@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ZONA CERO — Supervivencia Isométrica</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="vig"></div><div id="dmg"></div>
+
+<div id="hud">
+  <div class="bar"><span class="ic">❤️</span><div class="track" id="fHp"><div class="fill"></div></div></div>
+  <div class="bar"><span class="ic">🍖</span><div class="track" id="fFood"><div class="fill"></div></div></div>
+  <div class="bar"><span class="ic">💧</span><div class="track" id="fWater"><div class="fill"></div></div></div>
+  <div class="bar"><span class="ic">⚡</span><div class="track" id="fSta"><div class="fill"></div></div></div>
+  <div id="wep"><span id="wName">Puños</span><span id="ammo"></span></div>
+  <div id="wep2">🪵 <b id="rWood">0</b> tablones · ⛽ <b id="rGas">0</b> bidones</div>
+</div>
+
+<div id="topR">
+  <div>Día <b id="dDay">1</b> · <span id="dHour">12:00</span> <span id="dIcon">☀️</span></div>
+  <div>Zombis: <b id="dKills">0</b></div>
+  <div id="obj"></div>
+</div>
+<canvas id="mini" width="130" height="130"></canvas>
+
+<div id="moodles">
+  <div class="moodle" id="mHun" title="Hambriento">🍖</div>
+  <div class="moodle" id="mThi" title="Sediento">💧</div>
+  <div class="moodle" id="mTir" title="Agotado">😮‍💨</div>
+  <div class="moodle" id="mHer" title="Herido">🩸</div>
+  <div class="moodle" id="mInf" title="Infectado">☣️</div>
+  <div class="moodle" id="mPan" title="Rodeado">😱</div>
+  <div class="moodle" id="mSue" title="Con sueño">😴</div>
+</div>
+
+<div id="hotbar">
+  <button class="slot empty" id="s0"><b class="k">1</b><span>🍖</span><b class="n">0</b></button>
+  <button class="slot empty" id="s1"><b class="k">2</b><span>💧</span><b class="n">0</b></button>
+  <button class="slot empty" id="s2"><b class="k">3</b><span>🩹</span><b class="n">0</b></button>
+  <button class="slot empty" id="s3"><b class="k">4</b><span>💊</span><b class="n">0</b></button>
+</div>
+
+<div id="hint">E — REGISTRAR</div>
+<div id="msgs"></div>
+
+<div id="controls">
+  <div id="joyZone"></div>
+  <div id="joyBase"><div id="joyStick"></div></div>
+  <div id="actCol">
+    <button class="abtn" id="btnLoot"><span>📦</span></button>
+    <button class="abtn" id="btnGun"><span>🔫</span></button>
+    <button class="abtn" id="btnCar"><span>🚗</span></button>
+    <button class="abtn" id="btnBed"><span>😴</span></button>
+    <button class="abtn" id="btnBuild"><span>🔨</span></button>
+  </div>
+  <button class="abtn" id="btnAtk"><span>🗡️</span>ATACAR</button>
+</div>
+
+<div class="screen" id="start">
+  <div class="panel">
+    <h1>ZONA <em>CERO</em></h1>
+    <div class="tag">— SUPERVIVENCIA ISOMÉTRICA —</div>
+    <div class="lore">El pueblo cayó. Saquea la <b>tienda, el hospital y la comisaría</b>,
+      tapia puertas y ventanas con <b>tablones</b>, maneja autos (hacen ruido…),
+      duerme en camas y cuidado con las <b>mordidas</b>. Encuentra la <b>radio</b>:
+      un helicóptero llega el <b>día 7</b>. Sobrevive hasta entonces.</div>
+    <div class="keys">
+      🖥️ PC: WASD mover · CLIC atacar · E registrar · F auto · B tapiar ·
+      Z dormir · Q cambiar arma · 1-4 objetos · SHIFT correr · hacha ➜ corta árboles<br>
+      📱 Cel: joystick + botones contextuales (aparecen solos cuando algo está cerca)
+    </div>
+    <button class="bigbtn" id="btnStart">SOBREVIVIR</button>
+  </div>
+</div>
+
+<div class="screen" id="over">
+  <div class="panel">
+    <h1>ASÍ TERMINÓ TU HISTORIA</h1>
+    <div id="stats"></div>
+    <button class="bigbtn" id="btnRetry">OTRA VIDA</button>
+  </div>
+</div>
+
+<script src="js/game.js"></script>
+</body>
+</html>
