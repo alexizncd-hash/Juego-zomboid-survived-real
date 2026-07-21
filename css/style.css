@@ -107,6 +107,7 @@ h1 em{font-style:normal;color:#a31621}
 .bigbtn{font-family:inherit;font-size:15px;letter-spacing:3px;padding:12px 34px;cursor:pointer;
   background:#a31621;color:#f2e9dc;border:none;border-radius:3px}
 .bigbtn:active{transform:scale(.97)}
+#btnContinue{background:#2e6b3a;display:block;margin:0 auto 10px}
 /* menú de fabricación */
 #craft{display:none;z-index:11}
 .cpanel{max-width:400px;max-height:84vh;overflow-y:auto;text-align:left;padding:16px 16px 18px}

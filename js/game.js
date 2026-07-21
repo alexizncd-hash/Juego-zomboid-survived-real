@@ -256,8 +256,8 @@ function buildStatics(){
     const s=SOLID[idx(i,j)];
     if(s===1||s===2)statics.push({kind:'wall',gx:i,gy:j,win:s===2,hue:WHUE[idx(i,j)],d:i+j});
   }
-  for(const t of treesL)statics.push({kind:'tree',gx:t.gx,gy:t.gy,s:t.s,d:t.gx+t.gy});
-  for(const f of furns)statics.push({kind:'furn',o:f,gx:f.gx,gy:f.gy,d:f.gx+f.gy});
+  for(const t of treesL)if(!t.dead)statics.push({kind:'tree',gx:t.gx,gy:t.gy,s:t.s,d:t.gx+t.gy});
+  for(const f of furns)if(!f.gone)statics.push({kind:'furn',o:f,gx:f.gx,gy:f.gy,d:f.gx+f.gy});
   for(const c of crates)statics.push({kind:'crate',o:c,gx:c.gx,gy:c.gy,d:c.gx+c.gy});
 }
 let miniBase=null;
@@ -290,7 +290,7 @@ function init(){
   weather={type:'clear',t:rand(30,60),inten:0,target:0};amb=[];puffs=[];
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
-  gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;
+  gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;saveT=25;
   prevNight=false;groanT=5;cam={x:0,y:0};
   document.getElementById('over').style.display='none';
   const oh=document.querySelector('#over h1');
@@ -584,7 +584,57 @@ function recLine(r){
   return '🏆 Mejor: día <b>'+r.bestDay+'</b> · <b>'+r.bestKills+'</b> bajas'+
     (r.wins?' · <b>'+r.wins+'</b> extracción(es)':'');
 }
+
+/* ================= GUARDADO (localStorage) ================= */
+const SAVE_KEY='zonaCero.save',SAVE_VER=3;
+let saveT=25;
+function u8b64(a){let s='';for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);return btoa(s);}
+function b64u8(b){const s=atob(b),a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a;}
+function hasSave(){try{const s=JSON.parse(localStorage.getItem(SAVE_KEY));return!!(s&&s.v===SAVE_VER);}catch(e){return false;}}
+function clearSave(){try{localStorage.removeItem(SAVE_KEY);}catch(e){}}
+function saveGame(){
+  if(!started||dead||!player)return false;
+  try{
+    const s={v:SAVE_VER,
+      floor:u8b64(FLOOR),solid:u8b64(SOLID),whue:u8b64(WHUE),
+      buildings,furns,crates,cars,treesL,fires,barrs,zombies,player,
+      inCar:inCar?cars.indexOf(inCar):-1,
+      gameTime,kills,radioFound,won,prevNight,groanT,spawnT,winT,engineT,weather};
+    localStorage.setItem(SAVE_KEY,JSON.stringify(s));
+    return true;
+  }catch(e){return false;}
+}
+function loadGame(){
+  let s;try{s=JSON.parse(localStorage.getItem(SAVE_KEY));}catch(e){return false;}
+  if(!s||s.v!==SAVE_VER)return false;
+  try{
+    FLOOR=b64u8(s.floor);SOLID=b64u8(s.solid);WHUE=b64u8(s.whue);
+    buildings=s.buildings;furns=s.furns;crates=s.crates;cars=s.cars;
+    treesL=s.treesL;fires=s.fires||[];barrs=s.barrs||{};zombies=s.zombies||[];
+    player=s.player;
+    if(!player.inv)player.inv={food:0,water:0,med:0,anti:0};
+    for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
+    player.sleeping=false;
+    corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
+    gameTime=s.gameTime;kills=s.kills;radioFound=s.radioFound;won=!!s.won;
+    prevNight=s.prevNight;groanT=s.groanT;spawnT=s.spawnT;winT=s.winT||0;engineT=s.engineT||0;
+    weather=s.weather||{type:'clear',t:40,inten:0,target:0};
+    inCar=(s.inCar>=0&&s.inCar<cars.length)?cars[s.inCar]:null;
+    dead=false;paused=false;crafting=false;flashT=0;shake=0;freeze=0;saveT=25;
+    DOM.craft.style.display='none';
+    buildStatics();buildMini();
+    cam={x:0,y:0};started=true;
+    return true;
+  }catch(e){return false;}
+}
+function manualSave(){
+  if(saveGame())msg('💾 Partida guardada');
+  else msg('No se pudo guardar',true);
+}
+try{addEventListener('beforeunload',()=>{if(started&&!dead)saveGame();});}catch(e){}
+
 function die(cause){
+  clearSave();                                     // la partida terminó
   dead=true;
   const mins=Math.floor(gameTime/60),secs=Math.floor(gameTime%60);
   const r=updateRecords(false);
@@ -602,6 +652,7 @@ function update(dt){
   player.slp=Math.max(0,player.slp-CFG.sleepDrain*dt);
   const day=dayNum(),night=isNight();
   updateWeather(dt);updateAmbient(dt);
+  saveT-=dt;if(saveT<=0){saveT=25;saveGame();}      // autoguardado silencioso
   if(night&&!prevNight&&day>=2)horde();
   prevNight=night;
   if(day>=CFG.radioAutoDay&&!radioFound){radioFound=true;
@@ -1449,6 +1500,7 @@ addEventListener('keydown',e=>{
   if(k==='b')tryBuild();
   if(k==='z')trySleep();
   if(k==='x')tryCook();
+  if(k==='g')manualSave();
 });
 addEventListener('keyup',e=>{const k=e.key.toLowerCase();keys[k]=false;if(k===' ')atkHold=false;});
 cv.addEventListener('mousemove',e=>{aim.x=e.clientX;aim.y=e.clientY;aim.has=true;});
@@ -1676,6 +1728,7 @@ function trySleep(){
   for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<6){
     msg('Demasiado peligro para dormir…',true);return;}
   player.sleeping=true;msg('😴 Durmiendo…');
+  saveGame();                                      // punto de control al dormir
 }
 function sleepTick(dt){
   const gdt=dt*CFG.sleepTimeScale;
@@ -1695,6 +1748,7 @@ function sleepTick(dt){
     msg('El hambre te despertó…',true);}
 }
 function win(){
+  clearSave();                                     // la partida terminó
   won=true;dead=true;
   const mins=Math.floor(gameTime/60);
   const r=updateRecords(true);
@@ -1984,7 +2038,7 @@ function drawPause(){
   ctx.fillStyle='#c8d3b0';ctx.font='26px Courier New';ctx.textAlign='center';
   ctx.fillText('‖ PAUSA',VW/2,VH/2-6);
   ctx.font='13px Courier New';ctx.fillStyle='#7d8a68';
-  ctx.fillText('P / ESC seguir · M sonido '+(muted?'OFF':'ON')+' · F9 catador',VW/2,VH/2+18);
+  ctx.fillText('P/ESC seguir · G guardar · M sonido '+(muted?'OFF':'ON')+' · F9 catador',VW/2,VH/2+18);
   ctx.textAlign='left';
 }
 
@@ -1994,6 +2048,15 @@ buildTiles();
   const r=loadRec();if(!r.runs)return;
   const el=$('recLine');el.style.display='block';
   el.innerHTML=recLine(r)+' · '+r.runs+' intento(s)';
+})();
+(function showContinue(){
+  if(!hasSave())return;
+  const bc=$('btnContinue');bc.style.display='inline-block';
+  bc.addEventListener('click',()=>{
+    if(loadGame()){document.getElementById('start').style.display='none';
+      sfx(300,.15,'triangle',.05);msg('▶ Partida cargada');}
+    else msg('El guardado está dañado o es de otra versión',true);
+  });
 })();
 document.getElementById('btnStart').addEventListener('click',()=>{
   init();started=true;
