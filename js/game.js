@@ -24,8 +24,18 @@ const DOM={
 for(const k of ['food','water','med','anti'])DOM.slotN[k]=DOM.slots[k].querySelector('.n');
 for(const id of ['mHun','mThi','mTir','mHer','mInf','mPan','mSue'])DOM.moodle[id]=$(id);
 
-let VW,VH;
-function resize(){VW=cv.width=innerWidth;VH=cv.height=innerHeight;lightC.width=VW;lightC.height=VH;}
+let VW,VH,DPR=1;
+// Retina/alta densidad: canvas físico a DPR (tope 2 por rendimiento),
+// coordenadas lógicas en px CSS vía setTransform.
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  VW=innerWidth;VH=innerHeight;
+  cv.width=VW*DPR;cv.height=VH*DPR;
+  cv.style.width=VW+'px';cv.style.height=VH+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  lightC.width=VW*DPR;lightC.height=VH*DPR;
+  lctx.setTransform(DPR,0,0,DPR,0,0);
+}
 addEventListener('resize',resize);resize();
 const TOUCH=('ontouchstart' in window||navigator.maxTouchPoints>0);
 if(TOUCH)document.body.classList.add('touch');
@@ -81,6 +91,7 @@ function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
 let AC=null,muted=false;
 function sfx(f,d,type,g,slide){if(muted)return;try{
   AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+  if(AC.state==='suspended')AC.resume();  // iOS Safari lo suspende hasta un gesto
   const o=AC.createOscillator(),ga=AC.createGain();
   o.type=type||'square';o.frequency.value=f;
   if(slide)o.frequency.exponentialRampToValueAtTime(slide,AC.currentTime+d);
@@ -1140,7 +1151,7 @@ function draw(){
       g.addColorStop(0,'rgba(0,0,0,.9)');g.addColorStop(1,'rgba(0,0,0,0)');
       lctx.fillStyle=g;lctx.beginPath();lctx.arc(px,py,200,0,7);lctx.fill();}
     lctx.globalCompositeOperation='source-over';
-    ctx.drawImage(lightC,0,0);
+    ctx.drawImage(lightC,0,0,VW,VH);
   }
   if(player.sleeping){
     ctx.fillStyle='rgba(4,6,12,.62)';ctx.fillRect(0,0,VW,VH);
