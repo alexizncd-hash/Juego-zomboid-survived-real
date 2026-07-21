@@ -99,6 +99,17 @@ h1 em{font-style:normal;color:#a31621}
 .bigbtn{font-family:inherit;font-size:15px;letter-spacing:3px;padding:12px 34px;cursor:pointer;
   background:#a31621;color:#f2e9dc;border:none;border-radius:3px}
 .bigbtn:active{transform:scale(.97)}
+/* El Catador: informe en vivo del vigilante del sistema (F9) */
+#catador{position:fixed;bottom:12px;right:10px;z-index:9;display:none;
+  background:rgba(12,15,10,.92);border:1px solid #39442e;border-left:3px solid #d9c26a;
+  padding:8px 11px;font-size:11px;line-height:1.55;max-width:280px;border-radius:3px;
+  color:#9aa885;pointer-events:none}
+#catador b{color:#d9c26a}
+#catador .ok{color:#7dd97d}
+#catador .bad{color:#ff6b5e}
+#catador .wrn{color:#d9c26a}
+body.touch #catador{bottom:200px}
+
 #over{display:none}
 #over h1{color:#a31621;font-size:23px;letter-spacing:3px}
 #stats{font-size:14px;line-height:2;margin:16px 0;color:#c8d3b0}

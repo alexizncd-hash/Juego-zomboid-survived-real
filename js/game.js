@@ -3,6 +3,27 @@
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 const lightC=document.createElement('canvas'),lctx=lightC.getContext('2d');
 const mini=document.getElementById('mini'),mctx=mini.getContext('2d');
+
+/* ================= CACHE DE DOM ================= */
+// El script corre al final de <body>, así que todos los nodos ya existen.
+// Cachear las referencias evita ~20 consultas al DOM por frame en updateHUD.
+const $=id=>document.getElementById(id);
+const DOM={
+  hpFill:document.querySelector('#fHp .fill'),
+  foodFill:document.querySelector('#fFood .fill'),
+  waterFill:document.querySelector('#fWater .fill'),
+  staFill:document.querySelector('#fSta .fill'),
+  wName:$('wName'),ammo:$('ammo'),rWood:$('rWood'),rGas:$('rGas'),
+  obj:$('obj'),dDay:$('dDay'),dKills:$('dKills'),dHour:$('dHour'),
+  dIcon:$('dIcon'),hint:$('hint'),dmg:$('dmg'),
+  btnLoot:$('btnLoot'),btnGun:$('btnGun'),btnCar:$('btnCar'),
+  btnBed:$('btnBed'),btnBuild:$('btnBuild'),
+  slots:{food:$('s0'),water:$('s1'),med:$('s2'),anti:$('s3')},
+  slotN:{},moodle:{}
+};
+for(const k of ['food','water','med','anti'])DOM.slotN[k]=DOM.slots[k].querySelector('.n');
+for(const id of ['mHun','mThi','mTir','mHer','mInf','mPan','mSue'])DOM.moodle[id]=$(id);
+
 let VW,VH;
 function resize(){VW=cv.width=innerWidth;VH=cv.height=innerHeight;lightC.width=VW;lightC.height=VH;}
 addEventListener('resize',resize);resize();
@@ -33,9 +54,32 @@ const MELEE=[
 ];
 const GUN={n:'Pistola 9mm',dmg:34,cd:.27,range:11,noise:14};
 
+/* ================= CONFIG / BALANCE ================= */
+// Todas las constantes ajustables del juego en un solo lugar.
+const CFG={
+  survivalDays:7,          // día en que llega la extracción
+  extractRadius:3.2,       // distancia al helipuerto para ser extraído
+  extractHold:4,           // segundos que hay que aguantar sobre el punto
+  radioAutoDay:5,          // día en que la radio aparece sola si no la hallaste
+  // desgaste de estadísticas (por segundo)
+  foodDrain:.32, waterDrain:.42,
+  starveDmg:2.5, thirstDmg:3, infectDmg:1.05,
+  sleepDrain:.23,          // sueño perdido por segundo despierto
+  // movimiento del jugador
+  walkSpeed:3.7, runSpeed:5.8,
+  staRun:13, staRegen:9,   // stamina gastada al correr / recuperada al caminar
+  hurtSlow:.85, sleepySlow:.9,
+  // zombis
+  detectDay:4.6, detectNight:6.2,
+  spawnCap:44,             // tope de zombis vivos a la vez
+  biteChance:.12,          // probabilidad de infección por golpe recibido
+  // sueño
+  sleepTimeScale:22, sleepRecover:13, sleepHeal:2.2
+};
+
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
-let AC=null;
-function sfx(f,d,type,g,slide){try{
+let AC=null,muted=false;
+function sfx(f,d,type,g,slide){if(muted)return;try{
   AC=AC||new (window.AudioContext||window.webkitAudioContext)();
   const o=AC.createOscillator(),ga=AC.createGain();
   o.type=type||'square';o.frequency.value=f;
@@ -48,7 +92,7 @@ function sfx(f,d,type,g,slide){try{
 // SOLID: 0 libre, 1 muro, 2 ventana, 3 árbol, 4 objeto (mueble/caja/auto)
 let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics;
 let player,zombies,corpses,parts,pools,shots,dmgs,cam;
-let gameTime,kills,dead=false,started=false,flashT=0,spawnT=0,freeze=0,shake=0;
+let gameTime,kills,dead=false,started=false,paused=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0;
@@ -226,7 +270,7 @@ function init(){
     inv:{food:1,water:1,med:0,anti:0}};
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
-  gameTime=0;kills=0;dead=false;flashT=0;spawnT=1;freeze=0;shake=0;
+  gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;
   prevNight=false;groanT=5;cam={x:0,y:0};
   document.getElementById('over').style.display='none';
   const oh=document.querySelector('#over h1');
@@ -252,11 +296,19 @@ function blood(gx,gy,n){
 function noise(gx,gy,r){for(const z of zombies)if(hyp(z.gx-gx,z.gy-gy)<r)z.forced=7;}
 
 /* ================= COLISIÓN (tiles) ================= */
+// Una ventana (código 2) solo bloquea el paso si está tapiada: sin tablones
+// es un punto de entrada para los zombis (y una vía de escape para ti).
+function solidAt(i,j){
+  const s=SOLID[idx(i,j)];
+  if(s===0)return false;
+  if(s===2)return !!barrs[i+','+j];
+  return true;
+}
 function collideTiles(e){
   const x0=Math.floor(e.gx-e.r),x1=Math.floor(e.gx+e.r),
         y0=Math.floor(e.gy-e.r),y1=Math.floor(e.gy+e.r);
   for(let j=y0;j<=y1;j++)for(let i=x0;i<=x1;i++){
-    const solid=(i<1||j<1||i>=MW-1||j>=MH-1)||SOLID[idx(i,j)]>0;
+    const solid=(i<1||j<1||i>=MW-1||j>=MH-1)||solidAt(i,j);
     if(!solid)continue;
     const cx=clamp(e.gx,i,i+1),cy=clamp(e.gy,j,j+1);
     let dx=e.gx-cx,dy=e.gy-cy;const d=hyp(dx,dy);
@@ -474,12 +526,29 @@ function shoot(){
   noise(player.gx,player.gy,GUN.noise);
   sfx(160,.14,'square',.1,60);sfx(1200,.05,'sawtooth',.04);
 }
+/* ================= RÉCORDS (localStorage) ================= */
+const REC_KEY='zonaCero.records';
+function loadRec(){try{return JSON.parse(localStorage.getItem(REC_KEY))||{};}catch(e){return{};}}
+function saveRec(r){try{localStorage.setItem(REC_KEY,JSON.stringify(r));}catch(e){}}
+function updateRecords(winFlag){
+  const r=loadRec();
+  r.bestDay=Math.max(r.bestDay||0,dayNum());
+  r.bestKills=Math.max(r.bestKills||0,kills);
+  r.wins=(r.wins||0)+(winFlag?1:0);
+  r.runs=(r.runs||0)+1;
+  saveRec(r);return r;
+}
+function recLine(r){
+  return '🏆 Mejor: día <b>'+r.bestDay+'</b> · <b>'+r.bestKills+'</b> bajas'+
+    (r.wins?' · <b>'+r.wins+'</b> extracción(es)':'');
+}
 function die(cause){
   dead=true;
   const mins=Math.floor(gameTime/60),secs=Math.floor(gameTime%60);
+  const r=updateRecords(false);
   document.getElementById('stats').innerHTML=
     'Sobreviviste <b>'+dayNum()+'</b> día(s) — '+mins+'m '+String(secs).padStart(2,'0')+'s<br>'+
-    'Zombis eliminados: <b>'+kills+'</b><br>Causa: <b>'+cause+'</b>';
+    'Zombis eliminados: <b>'+kills+'</b><br>Causa: <b>'+cause+'</b><br>'+recLine(r);
   document.getElementById('over').style.display='flex';
   sfx(55,.7,'sawtooth',.09,30);
 }
@@ -488,23 +557,23 @@ function die(cause){
 function update(dt){
   if(player.sleeping){sleepTick(dt);updateHUD(dayNum(),isNight());return;}
   gameTime+=dt;
-  player.slp=Math.max(0,player.slp-.23*dt);
+  player.slp=Math.max(0,player.slp-CFG.sleepDrain*dt);
   const day=dayNum(),night=isNight();
   if(night&&!prevNight&&day>=2)horde();
   prevNight=night;
-  if(day>=5&&!radioFound){radioFound=true;
-    msg('📻 Una radio militar suena a lo lejos: "…día 7… claro NORESTE…"');}
-  if(radioFound&&day>=7&&!won){
-    if(hyp(player.gx-EP.x,player.gy-EP.y)<3.2){winT+=dt;
-      if(winT>4){win();return;}}
+  if(day>=CFG.radioAutoDay&&!radioFound){radioFound=true;
+    msg('📻 Una radio militar suena a lo lejos: "…día '+CFG.survivalDays+'… claro NORESTE…"');}
+  if(radioFound&&day>=CFG.survivalDays&&!won){
+    if(hyp(player.gx-EP.x,player.gy-EP.y)<CFG.extractRadius){winT+=dt;
+      if(winT>CFG.extractHold){win();return;}}
     else winT=0;
   }
 
-  player.food=Math.max(0,player.food-.32*dt);
-  player.water=Math.max(0,player.water-.42*dt);
-  if(player.food<=0)player.hp-=2.5*dt;
-  if(player.water<=0)player.hp-=3*dt;
-  if(player.infected)player.hp-=1.05*dt;
+  player.food=Math.max(0,player.food-CFG.foodDrain*dt);
+  player.water=Math.max(0,player.water-CFG.waterDrain*dt);
+  if(player.food<=0)player.hp-=CFG.starveDmg*dt;
+  if(player.water<=0)player.hp-=CFG.thirstDmg*dt;
+  if(player.infected)player.hp-=CFG.infectDmg*dt;
   if(player.hp<=0&&!dead){
     die(player.infected?'La infección':player.water<=0?'La sed':'El hambre');return;}
 
@@ -519,11 +588,11 @@ function update(dt){
   if(joy){ix=joy.x;iy=joy.y;}
   const il=hyp(ix,iy);
   const wantRun=(keys['shift']||(joy&&joy.m>.84))&&il>0;
-  let maxSp=3.7;
-  if(wantRun&&player.sta>0){maxSp=5.8;player.sta=Math.max(0,player.sta-13*dt);}
-  else player.sta=clamp(player.sta+9*dt,0,100);
-  if(player.hp<35)maxSp*=.85;
-  if(player.slp<25)maxSp*=.9;
+  let maxSp=CFG.walkSpeed;
+  if(wantRun&&player.sta>0){maxSp=CFG.runSpeed;player.sta=Math.max(0,player.sta-CFG.staRun*dt);}
+  else player.sta=clamp(player.sta+CFG.staRegen*dt,0,100);
+  if(player.hp<35)maxSp*=CFG.hurtSlow;
+  if(player.slp<25)maxSp*=CFG.sleepySlow;
   let gv={x:0,y:0};
   if(il>0){
     const g=scr2grid(ix,iy),gl=hyp(g.x,g.y)||1;
@@ -550,10 +619,10 @@ function update(dt){
   }
 
   /* zombis */
-  const target=Math.min(44,7+(day-1)*3+(night?6:0));
+  const target=Math.min(CFG.spawnCap,7+(day-1)*3+(night?6:0));
   spawnT-=dt;
   if(zombies.length<target&&spawnT<=0){spawnZombie();spawnT=rand(.4,1.1);}
-  const detect=night?6.2:4.6;
+  const detect=night?CFG.detectNight:CFG.detectDay;
   for(const z of zombies){
     z.cd=Math.max(0,z.cd-dt);z.flash=Math.max(0,z.flash-dt);
     z.stun=Math.max(0,z.stun-dt);z.forced=Math.max(0,z.forced-dt);
@@ -569,7 +638,7 @@ function update(dt){
         z.cd=.9;player.hp-=z.dmg;flashT=.35;shake=Math.max(shake,6);vib(45);
         blood(player.gx,player.gy,4);
         dmgText(player.gx,player.gy,'-'+z.dmg,'#ff6b5e');
-        if(!player.infected&&Math.random()<.12){
+        if(!player.infected&&Math.random()<CFG.biteChance){
           player.infected=true;msg('☣️ ¡TE MORDIERON! Busca antibióticos…',true);
           sfx(200,.5,'sawtooth',.08,60);}
         sfx(60,.2,'sawtooth',.07);
@@ -616,41 +685,38 @@ function update(dt){
   updateHUD(day,night);
 }
 function updateHUD(day,night){
-  document.querySelector('#fHp .fill').style.transform='scaleX('+(player.hp/100)+')';
-  document.querySelector('#fFood .fill').style.transform='scaleX('+(player.food/100)+')';
-  document.querySelector('#fWater .fill').style.transform='scaleX('+(player.water/100)+')';
-  document.querySelector('#fSta .fill').style.transform='scaleX('+(player.sta/100)+')';
-  if(inCar){document.getElementById('wName').textContent='🚗 Manejando';
-    document.getElementById('ammo').textContent='⛽'+Math.max(0,Math.round(inCar.fuel));}
-  else{document.getElementById('wName').textContent=(player.useGun&&player.hasGun)?GUN.n:MELEE[player.wTier].n;
-    document.getElementById('ammo').textContent=player.hasGun?('🔸'+player.ammo):'';}
-  document.getElementById('rWood').textContent=player.wood;
-  document.getElementById('rGas').textContent=player.gas;
-  const obj=document.getElementById('obj');
-  if(radioFound){obj.style.display='block';
-    obj.textContent=day>=7?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!':'🚁 Extracción: DÍA 7 · claro NE';}
-  document.getElementById('dDay').textContent=day;
-  document.getElementById('dKills').textContent=kills;
+  DOM.hpFill.style.transform='scaleX('+(player.hp/100)+')';
+  DOM.foodFill.style.transform='scaleX('+(player.food/100)+')';
+  DOM.waterFill.style.transform='scaleX('+(player.water/100)+')';
+  DOM.staFill.style.transform='scaleX('+(player.sta/100)+')';
+  if(inCar){DOM.wName.textContent='🚗 Manejando';
+    DOM.ammo.textContent='⛽'+Math.max(0,Math.round(inCar.fuel));}
+  else{DOM.wName.textContent=(player.useGun&&player.hasGun)?GUN.n:MELEE[player.wTier].n;
+    DOM.ammo.textContent=player.hasGun?('🔸'+player.ammo):'';}
+  DOM.rWood.textContent=player.wood;
+  DOM.rGas.textContent=player.gas;
+  if(radioFound){DOM.obj.style.display='block';
+    DOM.obj.textContent=day>=CFG.survivalDays?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!'
+      :'🚁 Extracción: DÍA '+CFG.survivalDays+' · claro NE';}
+  DOM.dDay.textContent=day;
+  DOM.dKills.textContent=kills;
   const hour=(12+tOfDay()*24)%24;
-  document.getElementById('dHour').textContent=
+  DOM.dHour.textContent=
     String(Math.floor(hour)).padStart(2,'0')+':'+String(Math.floor(hour%1*60)).padStart(2,'0');
-  document.getElementById('dIcon').textContent=night?'🌙':'☀️';
+  DOM.dIcon.textContent=night?'🌙':'☀️';
   const nl=inCar?null:nearLoot();
-  const hint=document.getElementById('hint');
-  if(nl){hint.style.display='block';
-    hint.textContent=(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
-  else hint.style.display='none';
-  document.getElementById('btnLoot').classList.toggle('on',!!nl);
-  const bg=document.getElementById('btnGun');
-  bg.classList.toggle('have',player.hasGun&&!inCar);
-  bg.classList.toggle('sel',player.useGun&&player.hasGun);
-  document.getElementById('btnCar').classList.toggle('on',!!inCar||!!nearCar());
-  document.getElementById('btnBed').classList.toggle('on',!inCar&&!!nearBed()&&player.slp<85);
-  document.getElementById('btnBuild').classList.toggle('on',!inCar&&!!nearBarrSpot());
-  const iv=[['s0','food'],['s1','water'],['s2','med'],['s3','anti']];
-  for(const[id,k]of iv){const el=document.getElementById(id);
-    el.querySelector('.n').textContent=player.inv[k];
-    el.classList.toggle('empty',player.inv[k]<=0);}
+  if(nl){DOM.hint.style.display='block';
+    DOM.hint.textContent=(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
+  else DOM.hint.style.display='none';
+  DOM.btnLoot.classList.toggle('on',!!nl);
+  DOM.btnGun.classList.toggle('have',player.hasGun&&!inCar);
+  DOM.btnGun.classList.toggle('sel',player.useGun&&player.hasGun);
+  DOM.btnCar.classList.toggle('on',!!inCar||!!nearCar());
+  DOM.btnBed.classList.toggle('on',!inCar&&!!nearBed()&&player.slp<85);
+  DOM.btnBuild.classList.toggle('on',!inCar&&!!nearBarrSpot());
+  for(const k in DOM.slots){
+    DOM.slotN[k].textContent=player.inv[k];
+    DOM.slots[k].classList.toggle('empty',player.inv[k]<=0);}
   // moodles
   let close=0;for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<3)close++;
   setMoodle('mHun',player.food<25,player.food<=0);
@@ -660,10 +726,10 @@ function updateHUD(day,night){
   setMoodle('mInf',player.infected,player.infected&&player.hp<50);
   setMoodle('mPan',close>=3,close>=6);
   setMoodle('mSue',player.slp<25,player.slp<8);
-  document.getElementById('dmg').style.opacity=flashT>0?Math.min(1,flashT*3):0;
+  DOM.dmg.style.opacity=flashT>0?Math.min(1,flashT*3):0;
 }
 function setMoodle(id,on,crit){
-  const el=document.getElementById(id);
+  const el=DOM.moodle[id];
   el.classList.toggle('on',!!on);el.classList.toggle('crit',!!crit);
 }
 
@@ -1041,13 +1107,13 @@ function draw(){
     ctx.beginPath();ctx.arc(0,0,34*pul,0,7);ctx.stroke();ctx.restore();
     ctx.fillStyle='#7dd97d';ctx.font='bold 18px Courier New';
     ctx.fillText('H',ex,ey+6);
-    if(dayNum()>=7){
+    if(dayNum()>=CFG.survivalDays){
       for(let k=0;k<5;k++){const t=(gameTime*1.3+k*.9)%3;
         ctx.globalAlpha=.5*(1-t/3);
         ctx.fillStyle=k%2?'#d97d7d':'#c9c9c9';
         ctx.beginPath();ctx.arc(ex+Math.sin(gameTime+k)*6,ey-20-t*36,7+t*5,0,7);ctx.fill();}
       ctx.globalAlpha=1;
-      if(winT>0){ctx.fillStyle='#7dd97d';ctx.fillRect(ex-30,ey-92,60*(winT/4),6);
+      if(winT>0){ctx.fillStyle='#7dd97d';ctx.fillRect(ex-30,ey-92,60*(winT/CFG.extractHold),6);
         ctx.strokeStyle='#0d100a';ctx.strokeRect(ex-30,ey-92,60,6);}
     }
   }
@@ -1103,9 +1169,13 @@ function drawMini(){
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();keys[k]=true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();
+  if(k==='m'){muted=!muted;if(started)msg(muted?'🔇 Sonido silenciado':'🔊 Sonido activado');return;}
+  if(k==='f9'){e.preventDefault();toggleCatador();return;}
+  if((k==='p'||k==='escape')&&started&&!dead){paused=!paused;return;}
+  if(!player||paused||!started)return;
   if(k===' ')atkHold=true;
   if(k==='e')tryLoot();
-  if(k==='q'&&player&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
+  if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
   if(k==='1')useItem('food');
   if(k==='2')useItem('water');
   if(k==='3')useItem('med');
@@ -1306,12 +1376,12 @@ function trySleep(){
   player.sleeping=true;msg('😴 Durmiendo…');
 }
 function sleepTick(dt){
-  const gdt=dt*22;
+  const gdt=dt*CFG.sleepTimeScale;
   gameTime+=gdt;
-  player.slp=Math.min(100,player.slp+13*dt);
+  player.slp=Math.min(100,player.slp+CFG.sleepRecover*dt);
   player.food=Math.max(0,player.food-.16*gdt);
   player.water=Math.max(0,player.water-.2*gdt);
-  if(player.food>15&&player.water>15)player.hp=clamp(player.hp+2.2*dt,0,100);
+  if(player.food>15&&player.water>15)player.hp=clamp(player.hp+CFG.sleepHeal*dt,0,100);
   const night=isNight();
   if(night&&!prevNight&&dayNum()>=2){prevNight=night;player.sleeping=false;
     horde();msg('¡Gruñidos afuera te despertaron!',true);return;}
@@ -1325,12 +1395,13 @@ function sleepTick(dt){
 function win(){
   won=true;dead=true;
   const mins=Math.floor(gameTime/60);
+  const r=updateRecords(true);
   const oh=document.querySelector('#over h1');
   oh.textContent='🚁 TE EXTRAJERON — SOBREVIVISTE';
   oh.style.color='#7dd97d';
   document.getElementById('stats').innerHTML=
     'Aguantaste <b>'+dayNum()+'</b> días ('+mins+' min)<br>'+
-    'Zombis eliminados: <b>'+kills+'</b><br>Lo lograste. Pocos pueden decirlo.';
+    'Zombis eliminados: <b>'+kills+'</b><br>Lo lograste. Pocos pueden decirlo.<br>'+recLine(r);
   document.getElementById('over').style.display='flex';
   sfx(523,.2,'sine',.07);sfx(659,.2,'sine',.07);sfx(784,.45,'sine',.08);
 }
@@ -1345,8 +1416,92 @@ function drawBarr(b){
     ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-38,24*(b.hp/130),3);}
 }
 
+/* ================= EL CATADOR ================= */
+// El infiltrado del sistema. Como el catador que probaba cada plato del rey
+// antes de que él lo comiera, este vigilante "prueba" el estado del juego en
+// cada frame: si detecta veneno (NaN, valores corruptos, errores de JS,
+// entidades desbocadas, FPS en caída) lo traga él —lo registra y lo
+// neutraliza— antes de que llegue al jugador y rompa la partida.
+// F9 abre su informe en vivo.
+const CAT={panel:false,log:[],errs:0,fixes:0,fps:60,acc:0,frames:0,uiT:0};
+const catEl=$('catador');
+const finite=v=>typeof v==='number'&&isFinite(v);
+function catLog(sev,txt){
+  CAT.log.push({sev,txt,t:started?(gameTime||0).toFixed(0)+'s':'—'});
+  if(CAT.log.length>8)CAT.log.shift();
+  if(sev==='err')CAT.errs++;
+  console[sev==='err'?'error':'warn']('[CATADOR] '+txt);
+}
+addEventListener('error',e=>catLog('err','JS: '+(e.message||'desconocido')));
+addEventListener('unhandledrejection',e=>catLog('err','Promesa: '+((e.reason&&e.reason.message)||e.reason||'?')));
+function toggleCatador(){
+  CAT.panel=!CAT.panel;
+  catEl.style.display=CAT.panel?'block':'none';
+  if(CAT.panel)CAT.uiT=0;
+}
+function catadorTaste(dt){
+  // ritmo de frames
+  CAT.acc+=dt;CAT.frames++;
+  if(CAT.acc>=1){CAT.fps=Math.round(CAT.frames/CAT.acc);CAT.frames=0;CAT.acc=0;
+    if(CAT.fps<30&&!paused)catLog('warn','FPS bajo: '+CAT.fps);}
+  if(!player)return;
+  // el plato principal: el jugador
+  if(!finite(player.gx)||!finite(player.gy)||!finite(player.vx)||!finite(player.vy)){
+    catLog('err','Posición del jugador corrupta → restaurada');
+    player.gx=MW/2;player.gy=MH/2;player.vx=player.vy=0;CAT.fixes++;}
+  for(const k of['hp','food','water','sta','slp']){
+    if(!finite(player[k])){catLog('err','Stat "'+k+'" corrupta → 50');player[k]=50;CAT.fixes++;}
+    else if(player[k]>100){player[k]=100;CAT.fixes++;}}
+  if(player.ammo<0||!finite(player.ammo)){catLog('warn','Munición inválida → 0');player.ammo=0;CAT.fixes++;}
+  if(player.wood<0||!finite(player.wood)){catLog('warn','Madera inválida → 0');player.wood=0;CAT.fixes++;}
+  // los acompañantes: zombis y autos
+  let bad=0;
+  for(let i=zombies.length-1;i>=0;i--){const z=zombies[i];
+    if(!finite(z.gx)||!finite(z.gy)||!finite(z.hp)){zombies.splice(i,1);bad++;}}
+  if(bad){catLog('err',bad+' zombi(s) corrupto(s) purgado(s)');CAT.fixes+=bad;}
+  for(const c of cars)if(!finite(c.gx)||!finite(c.gy)||!finite(c.vx)||!finite(c.vy)){
+    catLog('err','Auto corrupto → detenido y recolocado');
+    c.gx=MW/2;c.gy=Math.floor(MH/2)+.5;c.vx=c.vy=0;CAT.fixes++;}
+  // desbordes de entidades (fugas de memoria en potencia)
+  if(zombies.length>CFG.spawnCap+20){
+    catLog('warn','Zombis desbocados ('+zombies.length+') → poda');
+    zombies.length=CFG.spawnCap;CAT.fixes++;}
+  if(parts.length>600){catLog('warn','Partículas desbocadas → poda');parts.length=300;CAT.fixes++;}
+  if(dmgs.length>200){catLog('warn','Textos de daño desbocados → poda');dmgs.length=100;CAT.fixes++;}
+  // el reloj del reino
+  if(started&&(!finite(gameTime)||gameTime<0)){
+    catLog('err','Reloj de juego corrupto → reiniciado a 0');gameTime=0;CAT.fixes++;}
+}
+// Informe en vivo del catador (se dibuja aunque la partida no haya empezado)
+function catadorPanel(dt){
+  if(!CAT.panel)return;
+  CAT.uiT-=dt;if(CAT.uiT>0)return;CAT.uiT=.25;
+  let h='<b>🍷 EL CATADOR</b> — '+(CAT.errs?'<span class="bad">'+CAT.errs+' veneno(s) detectado(s)</span>'
+    :'<span class="ok">sin veneno</span>')+
+    '<br>FPS '+CAT.fps+' · zombis '+(zombies?zombies.length:0)+
+    ' · partículas '+(parts?parts.length:0)+' · curas '+CAT.fixes;
+  for(const l of CAT.log)h+='<br><span class="'+(l.sev==='err'?'bad':'wrn')+'">['+l.t+'] '+l.txt+'</span>';
+  if(!CAT.log.length)h+='<br><span class="ok">Todos los platos probados. El rey puede comer.</span>';
+  catEl.innerHTML=h;
+}
+
+/* ================= PAUSA ================= */
+function drawPause(){
+  ctx.fillStyle='rgba(4,6,10,.55)';ctx.fillRect(0,0,VW,VH);
+  ctx.fillStyle='#c8d3b0';ctx.font='26px Courier New';ctx.textAlign='center';
+  ctx.fillText('‖ PAUSA',VW/2,VH/2-6);
+  ctx.font='13px Courier New';ctx.fillStyle='#7d8a68';
+  ctx.fillText('P / ESC seguir · M sonido '+(muted?'OFF':'ON')+' · F9 catador',VW/2,VH/2+18);
+  ctx.textAlign='left';
+}
+
 /* ================= ARRANQUE ================= */
 buildTiles();
+(function showStartRecords(){
+  const r=loadRec();if(!r.runs)return;
+  const el=$('recLine');el.style.display='block';
+  el.innerHTML=recLine(r)+' · '+r.runs+' intento(s)';
+})();
 document.getElementById('btnStart').addEventListener('click',()=>{
   init();started=true;
   document.getElementById('start').style.display='none';
@@ -1358,8 +1513,9 @@ let last=0;
 function loop(ts){
   const dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   if(freeze>0)freeze-=dt;
-  else if(started&&!dead)update(dt);
-  if(started)draw();
+  else if(started&&!dead&&!paused)update(dt);
+  catadorTaste(dt);catadorPanel(dt);
+  if(started){draw();if(paused)drawPause();}
   else{ctx.fillStyle='#0d100a';ctx.fillRect(0,0,VW,VH);}
   requestAnimationFrame(loop);
 }
