@@ -86,6 +86,7 @@ body.touch #cv{cursor:default}
   gap:11px;align-items:center;z-index:8}
 #actCol .abtn{width:62px;height:62px;display:none}
 #actCol #btnLoot{display:flex;opacity:.35}
+#actCol #btnCraft{display:flex}
 #btnLoot.on{opacity:1;border-color:#d9c26a}
 #btnGun.have{display:flex}
 #btnGun.sel{border-color:#d9c26a;background:rgba(217,194,106,.2)}
@@ -106,6 +107,30 @@ h1 em{font-style:normal;color:#a31621}
 .bigbtn{font-family:inherit;font-size:15px;letter-spacing:3px;padding:12px 34px;cursor:pointer;
   background:#a31621;color:#f2e9dc;border:none;border-radius:3px}
 .bigbtn:active{transform:scale(.97)}
+/* menú de fabricación */
+#craft{display:none;z-index:11}
+.cpanel{max-width:400px;max-height:84vh;overflow-y:auto;text-align:left;padding:16px 16px 18px}
+.chead{display:flex;justify-content:space-between;align-items:center;letter-spacing:2px;
+  color:#d9c26a;font-size:15px;font-weight:bold;margin-bottom:9px}
+.chead button{background:none;border:1px solid #39442e;color:#c8d3b0;font-family:inherit;
+  font-size:14px;width:30px;height:30px;border-radius:3px;cursor:pointer}
+#craftMats{font-size:12px;color:#9aa885;border:1px solid #2c3324;background:#151a10;
+  border-radius:3px;padding:6px 9px;margin-bottom:4px}
+#craftMats b{color:#d9c26a}
+.rrow{display:flex;align-items:center;gap:9px;border:1px solid #2c3324;border-radius:3px;
+  padding:7px 9px;margin-top:7px;background:#151a10}
+.rrow.off{opacity:.55}
+.ric{font-size:21px;width:26px;text-align:center}
+.rinfo{flex:1;min-width:0}
+.rn{color:#c8d3b0;font-size:12.5px}
+.rd{color:#6f7c5c;font-size:10.5px;line-height:1.4}
+.rc{font-size:11px;color:#9aa885;margin-top:2px}
+.rc .lack{color:#ff6b5e}
+.rbtn{font-family:inherit;background:#39442e;border:1px solid #4d5c3e;color:#d9c26a;
+  padding:8px 11px;border-radius:3px;font-size:11px;letter-spacing:1px;cursor:pointer;flex-shrink:0}
+.rbtn:active{transform:scale(.95)}
+.rbtn:disabled{opacity:.35;cursor:default}
+
 /* El Catador: informe en vivo del vigilante del sistema (F9) */
 #catador{position:fixed;bottom:12px;right:10px;z-index:9;display:none;
   background:rgba(12,15,10,.92);border:1px solid #39442e;border-left:3px solid #d9c26a;

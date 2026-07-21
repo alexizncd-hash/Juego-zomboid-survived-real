@@ -16,7 +16,7 @@
   <div class="bar"><span class="ic">💧</span><div class="track" id="fWater"><div class="fill"></div></div></div>
   <div class="bar"><span class="ic">⚡</span><div class="track" id="fSta"><div class="fill"></div></div></div>
   <div id="wep"><span id="wName">Puños</span><span id="ammo"></span></div>
-  <div id="wep2">🪵 <b id="rWood">0</b> tablones · ⛽ <b id="rGas">0</b> bidones</div>
+  <div id="wep2">🪵<b id="rWood">0</b> 🔩<b id="rScrap">0</b> 🧵<b id="rCloth">0</b> 🧪<b id="rAlc">0</b> ⛽<b id="rGas">0</b> <span id="rArm"></span></div>
 </div>
 
 <div id="topR">
@@ -52,6 +52,7 @@
   <div id="joyBase"><div id="joyStick"></div></div>
   <div id="actCol">
     <button class="abtn" id="btnLoot"><span>📦</span></button>
+    <button class="abtn" id="btnCraft"><span>🛠️</span></button>
     <button class="abtn" id="btnGun"><span>🔫</span></button>
     <button class="abtn" id="btnCar"><span>🚗</span></button>
     <button class="abtn" id="btnBed"><span>😴</span></button>
@@ -65,17 +66,26 @@
     <h1>ZONA <em>CERO</em></h1>
     <div class="tag">— SUPERVIVENCIA ISOMÉTRICA —</div>
     <div class="lore">El pueblo cayó. Saquea la <b>tienda, el hospital y la comisaría</b>,
-      tapia puertas y ventanas con <b>tablones</b>, maneja autos (hacen ruido…),
-      duerme en camas y cuidado con las <b>mordidas</b>. Encuentra la <b>radio</b>:
+      junta <b>madera, chatarra, tela y alcohol</b> y <b>fabrica</b> armas, vendas,
+      chalecos, muros y camas. Tapia puertas y ventanas, maneja autos (hacen ruido…),
+      duerme y cuidado con las <b>mordidas</b>. Encuentra la <b>radio</b>:
       un helicóptero llega el <b>día 7</b>. Sobrevive hasta entonces.</div>
     <div class="keys">
-      🖥️ PC: WASD mover · CLIC atacar · E registrar · F auto · B tapiar ·
+      🖥️ PC: WASD mover · CLIC atacar · E registrar · C fabricar · F auto · B tapiar ·
       Z dormir · Q cambiar arma · 1-4 objetos · SHIFT correr · hacha ➜ corta árboles<br>
       ⚙️ P/ESC pausa · M sonido · F9 monitor "El Catador"<br>
-      📱 Cel: joystick + botones contextuales (aparecen solos cuando algo está cerca)
+      📱 Cel: joystick + botones contextuales · 🛠️ abre la fabricación
     </div>
     <div class="tag" id="recLine" style="display:none"></div>
     <button class="bigbtn" id="btnStart">SOBREVIVIR</button>
+  </div>
+</div>
+
+<div class="screen" id="craft">
+  <div class="panel cpanel">
+    <div class="chead"><span>🛠️ FABRICACIÓN</span><button id="btnCraftClose">✕</button></div>
+    <div id="craftMats"></div>
+    <div id="recList"></div>
   </div>
 </div>
 

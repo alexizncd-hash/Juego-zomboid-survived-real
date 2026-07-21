@@ -14,10 +14,12 @@ const DOM={
   waterFill:document.querySelector('#fWater .fill'),
   staFill:document.querySelector('#fSta .fill'),
   wName:$('wName'),ammo:$('ammo'),rWood:$('rWood'),rGas:$('rGas'),
+  rScrap:$('rScrap'),rCloth:$('rCloth'),rAlc:$('rAlc'),rArm:$('rArm'),
   obj:$('obj'),dDay:$('dDay'),dKills:$('dKills'),dHour:$('dHour'),
   dIcon:$('dIcon'),hint:$('hint'),dmg:$('dmg'),
   btnLoot:$('btnLoot'),btnGun:$('btnGun'),btnCar:$('btnCar'),
   btnBed:$('btnBed'),btnBuild:$('btnBuild'),
+  craft:$('craft'),craftMats:$('craftMats'),recList:$('recList'),
   slots:{food:$('s0'),water:$('s1'),med:$('s2'),anti:$('s3')},
   slotN:{},moodle:{}
 };
@@ -103,7 +105,7 @@ function sfx(f,d,type,g,slide){if(muted)return;try{
 // SOLID: 0 libre, 1 muro, 2 ventana, 3 árbol, 4 objeto (mueble/caja/auto)
 let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics;
 let player,zombies,corpses,parts,pools,shots,dmgs,cam;
-let gameTime,kills,dead=false,started=false,paused=false,flashT=0,spawnT=0,freeze=0,shake=0;
+let gameTime,kills,dead=false,started=false,paused=false,crafting=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0;
@@ -278,7 +280,9 @@ function init(){
   player={gx:MW/2-4,gy:ry-3,r:.3,dir:0,vx:0,vy:0,hp:100,food:100,water:100,sta:100,
     wTier:0,cd:0,swing:0,walk:0,hasGun:false,useGun:false,ammo:0,gunFlash:0,
     infected:false,slp:100,sleeping:false,wood:2,gas:0,
+    scrap:0,cloth:0,alcohol:0,armor:0,
     inv:{food:1,water:1,med:0,anti:0}};
+  crafting=false;DOM.craft.style.display='none';
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
   gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;
@@ -391,7 +395,7 @@ function rollLoot(kind){
     else if(r<.66)addInv('anti','💊 Antibióticos');
     else if(r<.76)addInv('med','🩹 Vendas');
     else if(r<.9){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else msg('Solo polvo y ratas…');
+    else{player.alcohol++;msg('🧪 Botella de alcohol (+1)');}
   }else if(kind==='ropero'){
     if(r<.22)addInv('med','🩹 Botiquín');
     else if(r<.42){const rr=Math.random(),tier=rr<.5?1:(rr<.82?2:3);
@@ -399,28 +403,31 @@ function rollLoot(kind){
       else{player.ammo+=3;msg('Arma repetida → +3 balas');}}
     else if(r<.52)giveGunOrAmmo();
     else if(r<.6)addInv('anti','💊 Antibióticos');
-    else msg('Ropa vieja, nada útil…');
+    else{player.cloth+=2;msg('🧵 Tela de ropa vieja (+2)');}
   }else if(kind==='cama'){
     if(r<.3)addInv('med','🩹 Vendas bajo el colchón');
+    else if(r<.65){player.cloth++;msg('🧵 Sábanas hechas jirones (+1 tela)');}
     else msg('Nada bajo la cama… por suerte');
   }else if(kind==='mesa'){
     if(maybeRadio(.22))return;
     if(r<.35)addInv('food','🍖 Restos de comida');
     else if(r<.55){player.ammo+=3;msg('🔸 Balas sueltas (+3)');}
+    else if(r<.78){player.scrap++;msg('🔩 Chatarra (+1)');}
     else msg('Nada en la mesa…');
   }else if(kind==='estante'){
     if(r<.42)addInv('food','🍖 Provisiones');
     else if(r<.68)addInv('water','💧 Agua embotellada');
     else if(r<.85){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else msg('Estante saqueado hace tiempo…');
+    else{player.scrap++;msg('🔩 Chatarra del estante (+1)');}
   }else if(kind==='camilla'){
     if(r<.4)addInv('med','🩹 Botiquín');
     else if(r<.6)addInv('anti','💊 Antibióticos');
-    else msg('Sábanas manchadas… nada.');
+    else if(r<.8){player.alcohol++;msg('🧪 Frasco de alcohol (+1)');}
+    else{player.cloth++;msg('🧵 Sábanas (+1 tela)');}
   }else if(kind==='botiquin'){
-    if(r<.5)addInv('anti','💊 Antibióticos');
-    else if(r<.85)addInv('med','🩹 Botiquín');
-    else msg('Frascos vacíos…');
+    if(r<.4)addInv('anti','💊 Antibióticos');
+    else if(r<.7)addInv('med','🩹 Botiquín');
+    else{player.alcohol++;msg('🧪 Alcohol medicinal (+1)');}
   }else if(kind==='casillero'){
     if(maybeRadio(.2))return;
     if(r<.3)giveGunOrAmmo();
@@ -428,7 +435,7 @@ function rollLoot(kind){
     else if(r<.75){const rr=Math.random(),tier=rr<.4?2:3;
       if(tier>player.wTier){player.wTier=tier;msg('🪓 Equipaste: '+MELEE[tier].n);}
       else{player.ammo+=4;msg('Arma repetida → +4 balas');}}
-    else msg('Uniformes y papeles…');
+    else{player.scrap+=2;msg('🔩 Chatarra del casillero (+2)');}
   }else if(kind==='bomba'){
     if(r<.75){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
     else msg('La bomba está seca…');
@@ -438,7 +445,7 @@ function rollLoot(kind){
     else if(r<.65)addInv('food','🍖 Comida');
     else if(r<.75)addInv('med','🩹 Botiquín');
     else if(r<.85)giveGunOrAmmo();
-    else msg('🚗 El auto estaba vacío…');
+    else{player.scrap+=2;msg('🔩 Piezas sueltas del motor (+2)');}
   }else{ // caja
     if(r<.18){player.wood+=2;msg('🪵 Tablones (+2)');}
     else if(r<.35)addInv('food','🍖 Comida');else if(r<.5)addInv('water','💧 Agua');
@@ -447,7 +454,7 @@ function rollLoot(kind){
     else if(r<.88){const rr=Math.random(),tier=rr<.5?1:(rr<.82?2:3);
       if(tier>player.wTier){player.wTier=tier;msg('🪓 Equipaste: '+MELEE[tier].n);}
       else{player.ammo+=3;msg('Arma repetida → +3 balas');}}
-    else msg('📦 Vacía…');
+    else{player.scrap+=2;msg('🔩 Chatarra (+2)');}
   }
 }
 function maybeRadio(p){
@@ -487,7 +494,7 @@ function autoAim(maxD){
   return best;
 }
 function attack(){
-  if(player.cd>0||dead||inCar||player.sleeping)return;
+  if(player.cd>0||dead||inCar||player.sleeping||crafting)return;
   if(player.useGun&&player.hasGun){shoot();return;}
   const w=MELEE[player.wTier];
   if(TOUCH)autoAim(w.range+2.2);
@@ -646,9 +653,16 @@ function update(dt){
       if(bt){if(z.cd<=0){z.cd=1.05;hitBarr(bt,z);}continue;}
       z.gx+=dx/d*z.sp*dt;z.gy+=dy/d*z.sp*dt;
       if(!inCar&&d<player.r+z.r+.15&&z.cd<=0){
-        z.cd=.9;player.hp-=z.dmg;flashT=.35;shake=Math.max(shake,6);vib(45);
+        z.cd=.9;
+        let zdm=z.dmg;
+        if(player.armor>0){
+          zdm=Math.max(1,Math.round(zdm*.5));
+          player.armor=Math.max(0,player.armor-8);
+          if(player.armor<=0)msg('🦺 Tu chaleco quedó destrozado',true);
+        }
+        player.hp-=zdm;flashT=.35;shake=Math.max(shake,6);vib(45);
         blood(player.gx,player.gy,4);
-        dmgText(player.gx,player.gy,'-'+z.dmg,'#ff6b5e');
+        dmgText(player.gx,player.gy,'-'+zdm,'#ff6b5e');
         if(!player.infected&&Math.random()<CFG.biteChance){
           player.infected=true;msg('☣️ ¡TE MORDIERON! Busca antibióticos…',true);
           sfx(200,.5,'sawtooth',.08,60);}
@@ -706,6 +720,10 @@ function updateHUD(day,night){
     DOM.ammo.textContent=player.hasGun?('🔸'+player.ammo):'';}
   DOM.rWood.textContent=player.wood;
   DOM.rGas.textContent=player.gas;
+  DOM.rScrap.textContent=player.scrap;
+  DOM.rCloth.textContent=player.cloth;
+  DOM.rAlc.textContent=player.alcohol;
+  DOM.rArm.textContent=player.armor>0?'🦺'+Math.round(player.armor):'';
   if(radioFound){DOM.obj.style.display='block';
     DOM.obj.textContent=day>=CFG.survivalDays?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!'
       :'🚁 Extracción: DÍA '+CFG.survivalDays+' · claro NE';}
@@ -1182,8 +1200,11 @@ addEventListener('keydown',e=>{
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();
   if(k==='m'){muted=!muted;if(started)msg(muted?'🔇 Sonido silenciado':'🔊 Sonido activado');return;}
   if(k==='f9'){e.preventDefault();toggleCatador();return;}
-  if((k==='p'||k==='escape')&&started&&!dead){paused=!paused;return;}
-  if(!player||paused||!started)return;
+  if((k==='p'||k==='escape')&&started&&!dead){
+    if(crafting){toggleCraft();return;}
+    paused=!paused;return;}
+  if(k==='c'&&started&&!dead&&!paused){toggleCraft();return;}
+  if(!player||paused||crafting||!started)return;
   if(k===' ')atkHold=true;
   if(k==='e')tryLoot();
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
@@ -1236,6 +1257,7 @@ function bindTap(id,fn){
   el.addEventListener('mousedown',e=>{e.preventDefault();fn();});
 }
 bindTap('btnLoot',tryLoot);
+bindTap('btnCraft',toggleCraft);
 bindTap('btnGun',()=>{if(player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}});
 bindTap('btnCar',enterExitCar);
 bindTap('btnBed',trySleep);
@@ -1427,6 +1449,108 @@ function drawBarr(b){
     ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-38,24*(b.hp/130),3);}
 }
 
+/* ================= FABRICACIÓN ================= */
+// Materiales: se saquean de muebles temáticos (roperos→tela, casilleros→
+// chatarra, botiquines→alcohol) o talando árboles (madera).
+const MATS={
+  wood:{ic:'🪵',n:'madera'},scrap:{ic:'🔩',n:'chatarra'},
+  cloth:{ic:'🧵',n:'tela'},alcohol:{ic:'🧪',n:'alcohol'}
+};
+const RECIPES=[
+  {id:'tabla',ic:'🔪',n:'Tabla con clavos',d:'Arma nivel 1',cost:{wood:2,scrap:1},
+    can:()=>player.wTier<1,why:'Ya tienes un arma igual o mejor',
+    make(){player.wTier=1;msg('🔪 Fabricaste: Tabla con clavos');}},
+  {id:'hacha',ic:'🪓',n:'Hacha artesanal',d:'Arma nivel 3 · tala árboles',cost:{wood:3,scrap:4},
+    can:()=>player.wTier<3,why:'Ya tienes un arma igual o mejor',
+    make(){player.wTier=3;msg('🪓 Fabricaste: Hacha artesanal');}},
+  {id:'vendas',ic:'🩹',n:'Vendas',d:'+1 curación (ranura 3)',cost:{cloth:2},
+    make(){addInv('med','🩹 Vendas caseras');}},
+  {id:'medicina',ic:'💊',n:'Medicina casera',d:'+1 antibiótico (ranura 4)',cost:{alcohol:2,cloth:1},
+    make(){addInv('anti','💊 Medicina casera');}},
+  {id:'balas',ic:'🔸',n:'Balas 9mm ×4',d:'Recargas artesanales',cost:{scrap:3},
+    can:()=>player.hasGun,why:'Aún no tienes pistola',
+    make(){player.ammo+=4;msg('🔸 Fabricaste 4 balas');}},
+  {id:'chaleco',ic:'🦺',n:'Chaleco acolchado',d:'Reduce el daño a la mitad mientras aguanta',
+    cost:{cloth:3,scrap:2},
+    can:()=>player.armor<50,why:'Tu chaleco aún está en buen estado',
+    make(){player.armor=100;msg('🦺 Chaleco puesto (100)');}},
+  {id:'muro',ic:'🧱',n:'Muro de madera',d:'Se levanta frente a ti · los zombis lo golpean',
+    cost:{wood:3},make:()=>placeWall()},
+  {id:'cama',ic:'🛏️',n:'Cama improvisada',d:'Se coloca frente a ti · sirve para dormir',
+    cost:{wood:4,cloth:2},make:()=>placeBed()}
+];
+function freeTileAhead(){
+  const ti=Math.floor(player.gx+Math.cos(player.dir)*1.3),
+        tj=Math.floor(player.gy+Math.sin(player.dir)*1.3);
+  if(ti<1||tj<1||ti>=MW-1||tj>=MH-1||SOLID[idx(ti,tj)]!==0)return null;
+  if(Math.floor(player.gx)===ti&&Math.floor(player.gy)===tj)return null;
+  for(const c of cars)if(hyp(c.gx-(ti+.5),c.gy-(tj+.5))<c.r+.8)return null;
+  return{ti,tj};
+}
+function placeWall(){
+  const t=freeTileAhead();
+  if(!t){msg('No hay espacio libre enfrente',true);return false;}
+  barrs[bKey(t.ti,t.tj)]={gx:t.ti,gy:t.tj,hp:130,win:false};
+  SOLID[idx(t.ti,t.tj)]=5;
+  msg('🧱 Muro levantado');sfx(220,.07,'square',.05);sfx(260,.07,'square',.05);
+  return true;
+}
+function placeBed(){
+  const t=freeTileAhead();
+  if(!t){msg('No hay espacio libre enfrente',true);return false;}
+  const f={gx:t.ti,gy:t.tj,type:'cama',looted:true,rt:Infinity};
+  furns.push(f);SOLID[idx(t.ti,t.tj)]=4;
+  statics.push({kind:'furn',o:f,gx:t.ti,gy:t.tj,d:t.ti+t.tj});
+  msg('🛏️ Cama lista — duerme con Z');sfx(240,.1,'triangle',.05);
+  return true;
+}
+function canAfford(rec){
+  for(const m in rec.cost)if((player[m]||0)<rec.cost[m])return false;
+  return true;
+}
+function craftItem(id){
+  const rec=RECIPES.find(r=>r.id===id);if(!rec)return;
+  if(rec.can&&!rec.can()){msg(rec.why,true);return;}
+  if(!canAfford(rec)){msg('Te faltan materiales',true);return;}
+  if(rec.make()===false){renderCraft();return;}  // no se pudo colocar: no gasta
+  for(const m in rec.cost)player[m]-=rec.cost[m];
+  sfx(300,.12,'triangle',.05);vib(15);
+  renderCraft();
+}
+function toggleCraft(){
+  if(!started||dead||player.sleeping)return;
+  crafting=!crafting;
+  DOM.craft.style.display=crafting?'flex':'none';
+  if(crafting){atkHold=false;renderCraft();sfx(340,.06,'triangle',.04);}
+}
+function renderCraft(){
+  let mh='Tienes: ';
+  for(const m in MATS)mh+=MATS[m].ic+' <b>'+(player[m]||0)+'</b> '+MATS[m].n+' · ';
+  DOM.craftMats.innerHTML=mh.slice(0,-3);
+  let h='';
+  for(const rec of RECIPES){
+    const blocked=rec.can&&!rec.can(),afford=canAfford(rec);
+    let ch='';
+    for(const m in rec.cost){
+      const lack=(player[m]||0)<rec.cost[m];
+      ch+='<span'+(lack?' class="lack"':'')+'>'+MATS[m].ic+rec.cost[m]+'</span> ';
+    }
+    h+='<div class="rrow'+(blocked||!afford?' off':'')+'">'+
+      '<div class="ric">'+rec.ic+'</div>'+
+      '<div class="rinfo"><div class="rn">'+rec.n+'</div>'+
+      '<div class="rd">'+(blocked?rec.why:rec.d)+'</div>'+
+      '<div class="rc">'+ch+'</div></div>'+
+      '<button class="rbtn" data-id="'+rec.id+'"'+(blocked||!afford?' disabled':'')+'>CREAR</button>'+
+      '</div>';
+  }
+  DOM.recList.innerHTML=h;
+}
+DOM.recList.addEventListener('click',e=>{
+  const b=e.target.closest('.rbtn');
+  if(b&&!b.disabled)craftItem(b.dataset.id);
+});
+$('btnCraftClose').addEventListener('click',()=>{if(crafting)toggleCraft();});
+
 /* ================= EL CATADOR ================= */
 // El infiltrado del sistema. Como el catador que probaba cada plato del rey
 // antes de que él lo comiera, este vigilante "prueba" el estado del juego en
@@ -1463,8 +1587,9 @@ function catadorTaste(dt){
   for(const k of['hp','food','water','sta','slp']){
     if(!finite(player[k])){catLog('err','Stat "'+k+'" corrupta → 50');player[k]=50;CAT.fixes++;}
     else if(player[k]>100){player[k]=100;CAT.fixes++;}}
-  if(player.ammo<0||!finite(player.ammo)){catLog('warn','Munición inválida → 0');player.ammo=0;CAT.fixes++;}
-  if(player.wood<0||!finite(player.wood)){catLog('warn','Madera inválida → 0');player.wood=0;CAT.fixes++;}
+  for(const k of['ammo','wood','scrap','cloth','alcohol','gas','armor']){
+    if(player[k]<0||!finite(player[k])){
+      catLog('warn','Recurso "'+k+'" inválido → 0');player[k]=0;CAT.fixes++;}}
   // los acompañantes: zombis y autos
   let bad=0;
   for(let i=zombies.length-1;i>=0;i--){const z=zombies[i];
@@ -1524,7 +1649,7 @@ let last=0;
 function loop(ts){
   const dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   if(freeze>0)freeze-=dt;
-  else if(started&&!dead&&!paused)update(dt);
+  else if(started&&!dead&&!paused&&!crafting)update(dt);
   catadorTaste(dt);catadorPanel(dt);
   if(started){draw();if(paused)drawPause();}
   else{ctx.fillStyle='#0d100a';ctx.fillRect(0,0,VW,VH);}
