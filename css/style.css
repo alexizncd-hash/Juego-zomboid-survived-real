@@ -86,7 +86,7 @@ body.touch #cv{cursor:default}
   gap:11px;align-items:center;z-index:8}
 #actCol .abtn{width:62px;height:62px;display:none}
 #actCol #btnLoot{display:flex;opacity:.35}
-#actCol #btnCraft{display:flex}
+#actCol #btnCraft,#actCol #btnSkills{display:flex}
 #btnLoot.on{opacity:1;border-color:#d9c26a}
 #btnGun.have{display:flex}
 #btnGun.sel{border-color:#d9c26a;background:rgba(217,194,106,.2)}
@@ -131,6 +131,19 @@ h1 em{font-style:normal;color:#a31621}
   padding:8px 11px;border-radius:3px;font-size:11px;letter-spacing:1px;cursor:pointer;flex-shrink:0}
 .rbtn:active{transform:scale(.95)}
 .rbtn:disabled{opacity:.35;cursor:default}
+
+/* panel de habilidades */
+#skills{display:none;z-index:11}
+.srow{border:1px solid #2c3324;border-radius:3px;padding:8px 10px;margin-top:8px;background:#151a10}
+.sh{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#c8d3b0}
+.sh b{color:#d9c26a}
+.sbar{height:7px;background:#0d100a;border:1px solid #2c3324;border-radius:3px;overflow:hidden;margin:5px 0}
+.sbar i{display:block;height:100%;background:linear-gradient(#ddc968,#a3903b)}
+.sp{font-size:10.5px;color:#7d8a68;line-height:1.4}
+.bhead{margin:14px 0 2px;color:#d9c26a;font-size:13px;letter-spacing:1px}
+.bnone{font-size:11.5px;color:#6f7c5c;padding:4px 2px}
+.brow{display:flex;justify-content:space-between;align-items:center;border:1px solid #2c3324;
+  border-radius:3px;padding:7px 10px;margin-top:7px;background:#151a10;font-size:12.5px;color:#c8d3b0}
 
 /* El Catador: informe en vivo del vigilante del sistema (F9) */
 #catador{position:fixed;bottom:12px;right:10px;z-index:9;display:none;

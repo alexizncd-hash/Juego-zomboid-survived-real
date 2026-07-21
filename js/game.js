@@ -18,8 +18,9 @@ const DOM={
   obj:$('obj'),dDay:$('dDay'),dKills:$('dKills'),dHour:$('dHour'),
   dIcon:$('dIcon'),hint:$('hint'),dmg:$('dmg'),
   btnLoot:$('btnLoot'),btnGun:$('btnGun'),btnCar:$('btnCar'),
-  btnBed:$('btnBed'),btnBuild:$('btnBuild'),btnCook:$('btnCook'),
+  btnBed:$('btnBed'),btnBuild:$('btnBuild'),btnCook:$('btnCook'),btnSkills:$('btnSkills'),
   craft:$('craft'),craftMats:$('craftMats'),recList:$('recList'),
+  skills:$('skills'),skillList:$('skillList'),
   slots:{food:$('s0'),water:$('s1'),med:$('s2'),anti:$('s3')},
   slotN:{},moodle:{}
 };
@@ -105,7 +106,7 @@ function sfx(f,d,type,g,slide){if(muted)return;try{
 // SOLID: 0 libre, 1 muro, 2 ventana, 3 árbol, 4 objeto (mueble/caja/auto)
 let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics;
 let player,zombies,corpses,parts,pools,shots,dmgs,cam;
-let gameTime,kills,dead=false,started=false,paused=false,crafting=false,flashT=0,spawnT=0,freeze=0,shake=0;
+let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOpen=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
@@ -285,8 +286,11 @@ function init(){
     wTier:0,wDur:0,wDurMax:1,cd:0,swing:0,walk:0,hasGun:false,useGun:false,ammo:0,gunFlash:0,
     infected:false,slp:100,sleeping:false,wood:2,gas:0,
     scrap:0,cloth:0,alcohol:0,armor:0,rawFood:0,
+    skills:{carp:0,mech:0,elec:0,med:0,str:0},
+    xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
     inv:{food:1,water:1,med:0,anti:0}};
-  fires=[];crafting=false;DOM.craft.style.display='none';
+  fires=[];crafting=false;skillsOpen=false;
+  DOM.craft.style.display='none';DOM.skills.style.display='none';
   weather={type:'clear',t:rand(30,60),inten:0,target:0};amb=[];puffs=[];
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
@@ -388,7 +392,16 @@ function giveGunOrAmmo(){
     msg('🔫 ¡Una Pistola 9mm! (+8 balas)');sfx(400,.25,'triangle',.06);}
   else{player.ammo+=6;msg('🔸 Balas 9mm (+6)');}
 }
+// Libros temáticos según el mueble saqueado.
+const BOOK_SRC={ropero:['str','carp'],estante:['carp','elec'],mesa:['elec','mech'],
+  casillero:['str','mech'],alacena:['carp','med'],botiquin:['med'],camilla:['med'],auto:['mech']};
+function maybeBook(kind){
+  const opts=BOOK_SRC[kind];
+  if(opts&&Math.random()<.12){giveBook(opts[irand(0,opts.length)]);return true;}
+  return false;
+}
 function rollLoot(kind){
+  if(maybeBook(kind))return;
   const r=Math.random();
   if(kind==='nevera'){
     if(r<.3)addInv('food','🍖 Comida enlatada');
@@ -489,7 +502,8 @@ function useItem(k,silent){
   if(!silent)player.inv[k]--;
   if(k==='food'){player.food=clamp(player.food+45,0,100);if(!silent)msg('🍖 Comiste (+45)');}
   if(k==='water'){player.water=clamp(player.water+45,0,100);if(!silent)msg('💧 Bebiste (+45)');}
-  if(k==='med'){player.hp=clamp(player.hp+40,0,100);if(!silent)msg('🩹 Te curaste (+40)');}
+  if(k==='med'){const heal=Math.round(40*(1+sk('med')*.12));   // 💊 medicina: +12%/nivel
+    player.hp=clamp(player.hp+heal,0,100);if(!silent){msg('🩹 Te curaste (+'+heal+')');gainXP('med',18);}}
   sfx(560,.12,'sine',.05);
 }
 
@@ -517,7 +531,7 @@ function autoAim(maxD){
   return best;
 }
 function attack(){
-  if(player.cd>0||dead||inCar||player.sleeping||crafting)return;
+  if(player.cd>0||dead||inCar||player.sleeping||crafting||skillsOpen)return;
   if(player.useGun&&player.hasGun){shoot();return;}
   const w=MELEE[player.wTier];
   if(TOUCH)autoAim(w.range+2.2);
@@ -531,6 +545,7 @@ function attack(){
       if(da<w.arc/2+.35){
         let dm=weak?w.dmg*.5:w.dmg;
         if(player.slp<25)dm*=.75;
+        dm*=(1+sk('str')*.08);                        // 💪 fuerza: +8% por nivel
         z.hp-=dm;z.flash=.12;z.stun=.22;z.forced=6;
         const kb=z.type==='tank'?.15:.45;
         z.gx+=dx/Math.max(d,.1)*kb;z.gy+=dy/Math.max(d,.1)*kb;
@@ -613,6 +628,9 @@ function loadGame(){
     treesL=s.treesL;fires=s.fires||[];barrs=s.barrs||{};zombies=s.zombies||[];
     player=s.player;
     if(!player.inv)player.inv={food:0,water:0,med:0,anti:0};
+    if(!player.skills)player.skills={carp:0,mech:0,elec:0,med:0,str:0};
+    if(!player.xp)player.xp={carp:0,mech:0,elec:0,med:0,str:0};
+    if(!player.books)player.books=[];
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -766,6 +784,7 @@ function update(dt){
   }
   zombies=zombies.filter(z=>{
     if(z.hp<=0){kills++;blood(z.gx,z.gy,12);
+      gainXP('str',z.type==='tank'?14:z.type==='runner'?7:9);   // 💪 aprendes peleando
       corpses.push({gx:z.gx,gy:z.gy,dir:z.dir||0,type:z.type,shirt:z.shirt,pants:z.pants,life:35});
       if(corpses.length>40)corpses.shift();
       sfx(90,.25,'sawtooth',.05,50);return false;}
@@ -1389,10 +1408,10 @@ function draw(){
     g.addColorStop(0,'rgba(0,0,0,.95)');g.addColorStop(1,'rgba(0,0,0,0)');
     lctx.fillStyle=g;
     lctx.beginPath();lctx.moveTo(px,py);lctx.arc(px,py,R,a-half,a+half);lctx.closePath();lctx.fill();
-    for(const f of fires){                          // luz cálida de las fogatas
+    for(const f of fires){                          // luz de fogatas y generadores
       const fx=g2sx(f.gx,f.gy)-cam.x+shx,fy=g2sy(f.gx,f.gy)-cam.y+shy-6;
-      if(fx<-140||fx>VW+140||fy<-140||fy>VH+140)continue;
-      const rr=80+Math.sin(gameTime*9+f.gx*3)*9;
+      if(fx<-160||fx>VW+160||fy<-160||fy>VH+160)continue;
+      const rr=f.gen?150:80+Math.sin(gameTime*9+f.gx*3)*9;   // 💡 luz más amplia
       g=lctx.createRadialGradient(fx,fy,8,fx,fy,rr);
       g.addColorStop(0,'rgba(0,0,0,.92)');g.addColorStop(1,'rgba(0,0,0,0)');
       lctx.fillStyle=g;lctx.beginPath();lctx.arc(fx,fy,rr,0,7);lctx.fill();
@@ -1486,9 +1505,11 @@ addEventListener('keydown',e=>{
   if(k==='f9'){e.preventDefault();toggleCatador();return;}
   if((k==='p'||k==='escape')&&started&&!dead){
     if(crafting){toggleCraft();return;}
+    if(skillsOpen){toggleSkills();return;}
     paused=!paused;return;}
-  if(k==='c'&&started&&!dead&&!paused){toggleCraft();return;}
-  if(!player||paused||crafting||!started)return;
+  if(k==='c'&&started&&!dead&&!paused&&!skillsOpen){toggleCraft();return;}
+  if(k==='h'&&started&&!dead&&!paused&&!crafting){toggleSkills();return;}
+  if(!player||paused||crafting||skillsOpen||!started)return;
   if(k===' ')atkHold=true;
   if(k==='e')tryLoot();
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
@@ -1549,6 +1570,7 @@ bindTap('btnCar',enterExitCar);
 bindTap('btnBed',trySleep);
 bindTap('btnBuild',tryBuild);
 bindTap('btnCook',tryCook);
+bindTap('btnSkills',toggleSkills);
 const slotK=[['s0','food'],['s1','water'],['s2','med'],['s3','anti']];
 for(const[id,k]of slotK)bindTap(id,()=>useItem(k));
 
@@ -1569,7 +1591,11 @@ function enterExitCar(){
         player.gx=nx;player.gy=ny;break;}}
     inCar=null;msg('Bajaste del auto');return;}
   const c=nearCar();if(!c)return;
-  if(!c.drivable){msg('Este auto no enciende…',true);sfx(90,.3,'sawtooth',.05,50);return;}
+  if(!c.drivable){
+    if(sk('mech')>=2){c.drivable=true;gainXP('mech',25);
+      msg('🔧 Hiciste puente al motor — ¡arrancó!');sfx(70,.4,'sawtooth',.06,140);}
+    else{msg('Este auto no enciende… (Mecánica 2 para hacer puente)',true);
+      sfx(90,.3,'sawtooth',.05,50);return;}}
   if(c.fuel<15&&player.gas>0){player.gas--;c.fuel+=30;msg('⛽ Echaste un bidón (+30)');}
   if(c.fuel<=0){msg('Sin gasolina — busca bidones en la GASOLINERA',true);return;}
   inCar=c;msg('🚗 Al volante (el motor hace RUIDO…)');sfx(80,.4,'sawtooth',.06,130);
@@ -1601,8 +1627,9 @@ function driveCar(dt){
     if(sp>3){c.hp-=sp*1.8;shake=Math.max(shake,5);sfx(70,.2,'sawtooth',.08);
       msg('💥 ¡Chocaste!',true);}
     c.vx*=.15;c.vy*=.15;sp=hyp(c.vx,c.vy);}
-  c.fuel=Math.max(0,c.fuel-sp*.09*dt);
-  if(sp>1){engineT-=dt;
+  c.fuel=Math.max(0,c.fuel-sp*.09*dt*(1-Math.min(.5,sk('mech')*.09)));  // 🔧 -gasto
+  if(sp>1){engineT-=dt;player.mechAcc=(player.mechAcc||0)+dt;
+    if(player.mechAcc>3){player.mechAcc=0;gainXP('mech',6);}          // aprendes manejando
     if(engineT<=0){engineT=.4;noise(c.gx,c.gy,9);sfx(62,.12,'sawtooth',.018);}}
   for(const z of zombies){
     const d=hyp(z.gx-c.gx,z.gy-c.gy);
@@ -1623,6 +1650,7 @@ function driveCar(dt){
 }
 /* ================= v4: BARRICADAS Y TALA ================= */
 const bKey=(i,j)=>i+','+j;
+const barrHP=()=>Math.round(130*(1+sk('carp')*.22));   // 🔨 muros +resistentes
 function nearBarrSpot(){
   for(const b of buildings)for(const d of b.doors){
     if(hyp(d.i+.5-player.gx,d.j+.5-player.gy)<1.5)return{i:d.i,j:d.j,win:false};}
@@ -1640,8 +1668,8 @@ function tryBuild(){
     if(!sp.win)SOLID[idx(sp.i,sp.j)]=0;
     msg('Quitaste la barricada (+1 🪵)');sfx(180,.12,'square',.04);return;}
   if(player.wood<2){msg('Necesitas 2 tablones 🪵 (tala árboles con el hacha)',true);return;}
-  player.wood-=2;
-  barrs[k]={gx:sp.i,gy:sp.j,hp:130,win:sp.win};
+  player.wood-=2;gainXP('carp',10);
+  const bh=barrHP();barrs[k]={gx:sp.i,gy:sp.j,hp:bh,mhp:bh,win:sp.win};
   if(!sp.win)SOLID[idx(sp.i,sp.j)]=5;
   msg(sp.win?'🔨 Ventana tapiada':'🔨 Puerta tapiada');
   sfx(220,.07,'square',.05);sfx(260,.07,'square',.05);
@@ -1676,7 +1704,8 @@ function chopTree(w){
   sfx(140,.09,'square',.06);
   if(t.hp<=0){t.dead=true;SOLID[idx(ti,tj)]=0;
     for(const st of statics)if(st.kind==='tree'&&st.gx===ti&&st.gy===tj)st.dead=true;
-    const n=irand(2,4);player.wood+=n;
+    const n=irand(2,4)+(sk('carp')>=2?1:0);player.wood+=n;   // 🔨 carpintería: +madera
+    gainXP('carp',12);
     msg('🪵 Talaste el árbol (+'+n+' tablones)');
     sfx(90,.25,'sawtooth',.07,40);}
   return true;
@@ -1708,7 +1737,7 @@ function dismantleFurniture(w){
   if(f.dhp<=0){
     f.gone=true;SOLID[idx(ti,tj)]=0;
     for(const st of statics)if(st.kind==='furn'&&st.o===f)st.dead=true;
-    let txt='';
+    let txt='';gainXP('carp',15);
     for(const m in D.yield){player[m]+=D.yield[m];txt+=MATS[m].ic+'+'+D.yield[m]+' ';}
     msg('🔨 Desarmaste: '+FURN[f.type].label+' → '+txt);
     sfx(90,.25,'sawtooth',.07,40);
@@ -1762,6 +1791,14 @@ function win(){
   sfx(523,.2,'sine',.07);sfx(659,.2,'sine',.07);sfx(784,.45,'sine',.08);
 }
 function drawFire(f,sx,sy){
+  if(f.gen){                                     // generador eléctrico
+    cube(f.gx-.5,f.gy-.5,14,['#5a5f55','#454a42','#6d7267'],.6);
+    const bl=Math.sin(gameTime*3)*.5+.5;
+    ctx.fillStyle='rgba(255,236,150,'+(.5+bl*.5)+')';
+    ctx.beginPath();ctx.arc(sx,sy-18,3.2,0,7);ctx.fill();
+    ctx.fillStyle='#7dd97d';ctx.fillRect(sx-4,sy-9,8,2);
+    return;
+  }
   ctx.fillStyle='#3a3a36';                       // círculo de piedras
   ctx.beginPath();ctx.ellipse(sx,sy,13,7,0,0,7);ctx.fill();
   ctx.fillStyle='#22221c';
@@ -1780,14 +1817,15 @@ function drawFire(f,sx,sy){
   }
 }
 function drawBarr(b){
-  const cols=b.hp>60?['#6b4f2a','#57401f','#7d5f38']:['#4c3820','#3a2a16','#5a4426'];
+  const mh=b.mhp||130;
+  const cols=b.hp>mh*.46?['#6b4f2a','#57401f','#7d5f38']:['#4c3820','#3a2a16','#5a4426'];
   cube(b.gx,b.gy,26,cols,.92);
   const sx=g2sx(b.gx+.5,b.gy+.5),sy=g2sy(b.gx+.5,b.gy+.5);
   ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.5;
   for(let k=0;k<3;k++){ctx.beginPath();
     ctx.moveTo(sx-13,sy-7-k*8);ctx.lineTo(sx+13,sy-9-k*8);ctx.stroke();}
-  if(b.hp<130){ctx.fillStyle='#151a10';ctx.fillRect(sx-12,sy-38,24,3);
-    ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-38,24*(b.hp/130),3);}
+  if(b.hp<mh){ctx.fillStyle='#151a10';ctx.fillRect(sx-12,sy-38,24,3);
+    ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-38,24*(b.hp/mh),3);}
 }
 
 /* ================= ATMÓSFERA (clima · ambiente · movilidad) ================= */
@@ -1828,6 +1866,66 @@ function footPuff(){                              // polvo al correr/frenar en t
     vx:rand(-.3,.3),vy:rand(-.3,.3),r:rand(.1,.2),life:rand(.4,.7),wet:raining()});
 }
 
+/* ================= HABILIDADES Y LIBROS ================= */
+// Se aprenden practicando (por hacer) y leyendo libros. Cada nivel mejora
+// algo tangible: daño, curación, resistencia de construcciones, autos…
+const SKILL_NAMES={carp:'🔨 Carpintería',mech:'🔧 Mecánica',elec:'⚡ Electricidad',
+  med:'💊 Medicina',str:'💪 Fuerza'};
+const SKILL_PERK={
+  carp:'Construcciones +resistentes · desbloquea muebles y muros',
+  mech:'Menos gasto de gasolina · arrancar autos averiados · reparar autos',
+  elec:'Desbloquea el generador (luz sin fuego)',
+  med:'Tus curaciones sanan más',
+  str:'Más daño cuerpo a cuerpo'};
+const BOOKS={carp:'Manual de Carpintería',mech:'Guía del Mecánico',
+  elec:'Electricidad para Todos',med:'Primeros Auxilios',str:'Rutina de Entrenamiento'};
+function xpNeed(lvl){return 100+lvl*90;}
+function gainXP(s,amt){
+  if(!player.skills)return;
+  player.xp[s]+=amt;
+  while(player.xp[s]>=xpNeed(player.skills[s])){
+    player.xp[s]-=xpNeed(player.skills[s]);player.skills[s]++;
+    msg('⭐ '+SKILL_NAMES[s]+' subió a nivel '+player.skills[s]);
+    sfx(520,.14,'triangle',.06);sfx(720,.2,'triangle',.05);vib(30);
+  }
+}
+const sk=n=>player.skills?player.skills[n]:0;      // atajo de lectura
+function giveBook(s){player.books.push({skill:s,name:BOOKS[s],cap:3});
+  msg('📖 Encontraste: '+BOOKS[s]);sfx(300,.12,'sine',.05);}
+function readBook(i){
+  const bk=player.books[i];if(!bk)return;
+  for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<6){
+    msg('Demasiado peligro para concentrarte…',true);return;}
+  const lvl=player.skills[bk.skill];
+  if(lvl>=bk.cap)msg('Ya sabes más que este libro ('+SKILL_NAMES[bk.skill]+' '+lvl+')');
+  else{gainXP(bk.skill,xpNeed(lvl)-player.xp[bk.skill]+5);gameTime+=45;}
+  player.books.splice(i,1);renderSkills();
+}
+function toggleSkills(){
+  if(!started||dead||player.sleeping)return;
+  if(crafting)toggleCraft();
+  skillsOpen=!skillsOpen;
+  DOM.skills.style.display=skillsOpen?'flex':'none';
+  if(skillsOpen){atkHold=false;renderSkills();sfx(340,.06,'triangle',.04);}
+}
+function renderSkills(){
+  let h='';
+  for(const s in SKILL_NAMES){
+    const lv=player.skills[s],need=xpNeed(lv),cur=player.xp[s];
+    h+='<div class="srow"><div class="sh"><span>'+SKILL_NAMES[s]+
+      '</span><b>Nivel '+lv+'</b></div>'+
+      '<div class="sbar"><i style="width:'+Math.min(100,cur/need*100)+'%"></i></div>'+
+      '<div class="sp">'+SKILL_PERK[s]+'</div></div>';
+  }
+  h+='<div class="bhead">📚 Libros por leer</div>';
+  if(!player.books.length)h+='<div class="bnone">No tienes libros. Búscalos saqueando.</div>';
+  else player.books.forEach((bk,i)=>{
+    h+='<div class="brow"><span>📖 '+bk.name+'</span>'+
+      '<button class="rbtn" data-i="'+i+'">LEER</button></div>';
+  });
+  DOM.skillList.innerHTML=h;
+}
+
 /* ================= FABRICACIÓN ================= */
 // Materiales: se saquean de muebles temáticos (roperos→tela, casilleros→
 // chatarra, botiquines→alcohol) o talando árboles (madera).
@@ -1840,7 +1938,7 @@ const RECIPES=[
     can:()=>player.wTier<1,why:'Ya tienes un arma igual o mejor',
     make(){equipWeapon(1);msg('🔪 Fabricaste: Tabla con clavos');}},
   {id:'hacha',ic:'🪓',n:'Hacha artesanal',d:'Arma nivel 3 · tala árboles',cost:{wood:3,scrap:4},
-    can:()=>player.wTier<3,why:'Ya tienes un arma igual o mejor',
+    req:{carp:2},can:()=>player.wTier<3,why:'Ya tienes un arma igual o mejor',
     make(){equipWeapon(3);msg('🪓 Fabricaste: Hacha artesanal');}},
   {id:'vendas',ic:'🩹',n:'Vendas',d:'+1 curación (ranura 3)',cost:{cloth:2},
     make(){addInv('med','🩹 Vendas caseras');}},
@@ -1854,11 +1952,17 @@ const RECIPES=[
     can:()=>player.armor<50,why:'Tu chaleco aún está en buen estado',
     make(){player.armor=100;msg('🦺 Chaleco puesto (100)');}},
   {id:'muro',ic:'🧱',n:'Muro de madera',d:'Se levanta frente a ti · los zombis lo golpean',
-    cost:{wood:3},make:()=>placeWall()},
+    cost:{wood:3},req:{carp:1},make:()=>placeWall()},
   {id:'cama',ic:'🛏️',n:'Cama improvisada',d:'Se coloca frente a ti · sirve para dormir',
-    cost:{wood:4,cloth:2},make:()=>placeBed()},
+    cost:{wood:4,cloth:2},req:{carp:1},make:()=>placeBed()},
   {id:'fogata',ic:'🔥',n:'Fogata',d:'Cocina carne cruda y da luz de noche',
     cost:{wood:2,scrap:1},make:()=>placeFire()},
+  {id:'generador',ic:'💡',n:'Generador',d:'Da luz de noche sin fuego, en un área amplia',
+    cost:{scrap:4,wood:2},req:{elec:2},make:()=>placeGen()},
+  {id:'reparauto',ic:'🚗',n:'Reparar auto',d:'Repara el auto que tengas al lado',
+    cost:{scrap:3},req:{mech:1},
+    can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
+    make:()=>repairCar()},
   {id:'reparar',ic:'🔧',n:'Reparar arma',d:'Restaura la condición del arma equipada',
     cost:{scrap:2},
     can:()=>player.wTier>0&&player.wDur<player.wDurMax,
@@ -1876,8 +1980,8 @@ function freeTileAhead(){
 function placeWall(){
   const t=freeTileAhead();
   if(!t){msg('No hay espacio libre enfrente',true);return false;}
-  barrs[bKey(t.ti,t.tj)]={gx:t.ti,gy:t.tj,hp:130,win:false};
-  SOLID[idx(t.ti,t.tj)]=5;
+  const bh=barrHP();barrs[bKey(t.ti,t.tj)]={gx:t.ti,gy:t.tj,hp:bh,mhp:bh,win:false};
+  SOLID[idx(t.ti,t.tj)]=5;gainXP('carp',8);
   msg('🧱 Muro levantado');sfx(220,.07,'square',.05);sfx(260,.07,'square',.05);
   return true;
 }
@@ -1898,8 +2002,22 @@ function placeFire(){
   sfx(120,.35,'sawtooth',.05,55);
   return true;
 }
+function placeGen(){
+  const t=freeTileAhead();
+  if(!t){msg('No hay espacio libre enfrente',true);return false;}
+  fires.push({gx:t.ti+.5,gy:t.tj+.5,gen:true});   // luz eléctrica: no cocina
+  msg('💡 Generador encendido');sfx(90,.3,'square',.04);
+  return true;
+}
+function repairCar(){
+  const c=inCar||nearCar();if(!c){msg('Acércate a un auto',true);return false;}
+  if(c.hp>=100){msg('Ese auto ya está en buen estado');return false;}
+  c.hp=Math.min(100,c.hp+50);gainXP('mech',35);
+  msg('🚗 Reparaste el auto ('+Math.round(c.hp)+'/100)');sfx(200,.15,'square',.05);
+  return true;
+}
 function nearFire(){
-  for(const f of fires)if(hyp(f.gx-player.gx,f.gy-player.gy)<1.7)return f;
+  for(const f of fires)if(!f.gen&&hyp(f.gx-player.gx,f.gy-player.gy)<1.7)return f;
   return null;
 }
 function tryCook(){
@@ -1908,7 +2026,7 @@ function tryCook(){
   if(player.rawFood<=0){msg('No tienes carne cruda 🥩');return;}
   let cooked=0;
   while(player.rawFood>0&&player.inv.food<6){player.rawFood--;player.inv.food++;cooked++;}
-  if(cooked>0){msg('🍳 Cocinaste '+cooked+' → 🍖 (ranura 1)');
+  if(cooked>0){msg('🍳 Cocinaste '+cooked+' → 🍖 (ranura 1)');gainXP('med',8);
     sfx(300,.14,'triangle',.05);sfx(380,.1,'triangle',.04);vib(15);}
   else msg('Tu inventario de comida está lleno');
 }
@@ -1916,8 +2034,18 @@ function canAfford(rec){
   for(const m in rec.cost)if((player[m]||0)<rec.cost[m])return false;
   return true;
 }
+function meetsReq(rec){
+  if(!rec.req)return true;
+  for(const s in rec.req)if(sk(s)<rec.req[s])return false;
+  return true;
+}
+function reqText(rec){
+  if(!rec.req)return'';
+  return Object.keys(rec.req).map(s=>SKILL_NAMES[s]+' '+rec.req[s]).join(' · ');
+}
 function craftItem(id){
   const rec=RECIPES.find(r=>r.id===id);if(!rec)return;
+  if(!meetsReq(rec)){msg('Necesitas '+reqText(rec),true);return;}
   if(rec.can&&!rec.can()){msg(rec.why,true);return;}
   if(!canAfford(rec)){msg('Te faltan materiales',true);return;}
   if(rec.make()===false){renderCraft();return;}  // no se pudo colocar: no gasta
@@ -1937,18 +2065,20 @@ function renderCraft(){
   DOM.craftMats.innerHTML=mh.slice(0,-3);
   let h='';
   for(const rec of RECIPES){
-    const blocked=rec.can&&!rec.can(),afford=canAfford(rec);
+    const noReq=!meetsReq(rec),blocked=rec.can&&!rec.can(),afford=canAfford(rec);
+    const off=noReq||blocked||!afford;
     let ch='';
     for(const m in rec.cost){
       const lack=(player[m]||0)<rec.cost[m];
       ch+='<span'+(lack?' class="lack"':'')+'>'+MATS[m].ic+rec.cost[m]+'</span> ';
     }
-    h+='<div class="rrow'+(blocked||!afford?' off':'')+'">'+
+    if(rec.req)ch+='<span'+(noReq?' class="lack"':'')+'>🎓'+reqText(rec)+'</span> ';
+    h+='<div class="rrow'+(off?' off':'')+'">'+
       '<div class="ric">'+rec.ic+'</div>'+
       '<div class="rinfo"><div class="rn">'+rec.n+'</div>'+
-      '<div class="rd">'+(blocked?rec.why:rec.d)+'</div>'+
+      '<div class="rd">'+(noReq?'Requiere '+reqText(rec):blocked?rec.why:rec.d)+'</div>'+
       '<div class="rc">'+ch+'</div></div>'+
-      '<button class="rbtn" data-id="'+rec.id+'"'+(blocked||!afford?' disabled':'')+'>CREAR</button>'+
+      '<button class="rbtn" data-id="'+rec.id+'"'+(off?' disabled':'')+'>CREAR</button>'+
       '</div>';
   }
   DOM.recList.innerHTML=h;
@@ -1958,6 +2088,11 @@ DOM.recList.addEventListener('click',e=>{
   if(b&&!b.disabled)craftItem(b.dataset.id);
 });
 $('btnCraftClose').addEventListener('click',()=>{if(crafting)toggleCraft();});
+DOM.skillList.addEventListener('click',e=>{
+  const b=e.target.closest('.rbtn');
+  if(b&&b.dataset.i!==undefined)readBook(+b.dataset.i);
+});
+$('btnSkillsClose').addEventListener('click',()=>{if(skillsOpen)toggleSkills();});
 
 /* ================= EL CATADOR ================= */
 // El infiltrado del sistema. Como el catador que probaba cada plato del rey
@@ -2069,7 +2204,7 @@ let last=0;
 function loop(ts){
   const dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   if(freeze>0)freeze-=dt;
-  else if(started&&!dead&&!paused&&!crafting)update(dt);
+  else if(started&&!dead&&!paused&&!crafting&&!skillsOpen)update(dt);
   catadorTaste(dt);catadorPanel(dt);
   if(started){draw();if(paused)drawPause();}
   else{ctx.fillStyle='#0d100a';ctx.fillRect(0,0,VW,VH);}

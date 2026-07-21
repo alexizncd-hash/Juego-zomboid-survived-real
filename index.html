@@ -53,6 +53,7 @@
   <div id="actCol">
     <button class="abtn" id="btnLoot"><span>📦</span></button>
     <button class="abtn" id="btnCraft"><span>🛠️</span></button>
+    <button class="abtn" id="btnSkills"><span>🎓</span></button>
     <button class="abtn" id="btnGun"><span>🔫</span></button>
     <button class="abtn" id="btnCar"><span>🚗</span></button>
     <button class="abtn" id="btnBed"><span>😴</span></button>
@@ -72,10 +73,10 @@
       duerme y cuidado con las <b>mordidas</b>. Encuentra la <b>radio</b>:
       un helicóptero llega el <b>día 7</b>. Sobrevive hasta entonces.</div>
     <div class="keys">
-      🖥️ PC: WASD mover · CLIC atacar · E registrar · C fabricar · X cocinar · F auto ·
-      B tapiar · Z dormir · Q cambiar arma · 1-4 objetos · SHIFT correr · hacha ➜ tala y desarma muebles<br>
-      ⚙️ P/ESC pausa · M sonido · F9 monitor "El Catador"<br>
-      📱 Cel: joystick + botones contextuales · 🛠️ abre la fabricación
+      🖥️ PC: WASD mover · CLIC atacar · E registrar · C fabricar · H habilidades · X cocinar ·
+      F auto · B tapiar · Z dormir · Q arma · 1-4 objetos · G guardar · SHIFT correr · hacha ➜ tala/desarma<br>
+      🎓 Aprende leyendo libros y practicando: carpintería, mecánica, electricidad, medicina, fuerza<br>
+      ⚙️ P/ESC pausa · M sonido · F9 "El Catador" · 📱 Cel: joystick + botones (🛠️ fabricar · 🎓 habilidades)
     </div>
     <div class="tag" id="recLine" style="display:none"></div>
     <button class="bigbtn" id="btnContinue" style="display:none">▶ CONTINUAR PARTIDA</button>
@@ -88,6 +89,13 @@
     <div class="chead"><span>🛠️ FABRICACIÓN</span><button id="btnCraftClose">✕</button></div>
     <div id="craftMats"></div>
     <div id="recList"></div>
+  </div>
+</div>
+
+<div class="screen" id="skills">
+  <div class="panel cpanel">
+    <div class="chead"><span>🎓 HABILIDADES</span><button id="btnSkillsClose">✕</button></div>
+    <div id="skillList"></div>
   </div>
 </div>
 
