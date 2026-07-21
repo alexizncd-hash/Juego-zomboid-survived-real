@@ -109,6 +109,8 @@ let gameTime,kills,dead=false,started=false,paused=false,crafting=false,flashT=0
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
+let weather=null,amb=[],puffs=[];               // clima, partículas ambientales, polvo
+const REDUCE_MOTION=(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 const idx=(i,j)=>j*MW+i;
 
 const HUES=[ // paletas de muros por casa: [cara izq, cara der, tapa]
@@ -283,6 +285,7 @@ function init(){
     scrap:0,cloth:0,alcohol:0,armor:0,rawFood:0,
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;DOM.craft.style.display='none';
+  weather={type:'clear',t:rand(30,60),inten:0,target:0};amb=[];puffs=[];
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
   gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;
@@ -596,6 +599,7 @@ function update(dt){
   gameTime+=dt;
   player.slp=Math.max(0,player.slp-CFG.sleepDrain*dt);
   const day=dayNum(),night=isNight();
+  updateWeather(dt);updateAmbient(dt);
   if(night&&!prevNight&&day>=2)horde();
   prevNight=night;
   if(day>=CFG.radioAutoDay&&!radioFound){radioFound=true;
@@ -639,7 +643,9 @@ function update(dt){
   const ac=il>0?1-Math.pow(.00003,dt):1-Math.pow(2e-10,dt); // arranque ágil, freno seco
   player.vx=lerp(player.vx,gv.x*maxSp,ac);player.vy=lerp(player.vy,gv.y*maxSp,ac);
   player.gx+=player.vx*dt;player.gy+=player.vy*dt;
-  player.walk+=hyp(player.vx,player.vy)*dt*3.4;
+  const spd=hyp(player.vx,player.vy);
+  player.walk+=spd*dt*3.4;
+  if(spd>4.6&&Math.random()<dt*14)footPuff();     // levanta polvo al esprintar
   collideTiles(player);carPush(player);
 
   if(!TOUCH&&aim.has){
@@ -659,7 +665,9 @@ function update(dt){
   const target=Math.min(CFG.spawnCap,7+(day-1)*3+(night?6:0));
   spawnT-=dt;
   if(zombies.length<target&&spawnT<=0){spawnZombie();spawnT=rand(.4,1.1);}
-  const detect=night?CFG.detectNight:CFG.detectDay;
+  let detect=night?CFG.detectNight:CFG.detectDay;
+  if(raining())detect*=.72;                       // la lluvia tapa tus ruidos
+  detect*=(1-foggy()*.3);                         // la niebla también te oculta
   for(const z of zombies){
     z.cd=Math.max(0,z.cd-dt);z.flash=Math.max(0,z.flash-dt);
     z.stun=Math.max(0,z.stun-dt);z.forced=Math.max(0,z.forced-dt);
@@ -1017,6 +1025,8 @@ function draw(){
   cam.x=lerp(cam.x,ctx2,.14);cam.y=lerp(cam.y,cty,.14);
   let shx=0,shy=0;
   if(shake>0){shx=rand(-shake,shake);shy=rand(-shake,shake);}
+  if(!REDUCE_MOTION&&!inCar)                        // leve balanceo al caminar
+    shy+=Math.sin(player.walk*2)*Math.min(1.4,hyp(player.vx||0,player.vy||0)*.28);
   ctx.fillStyle='#10130c';ctx.fillRect(0,0,VW,VH);
   ctx.save();ctx.translate(-cam.x+shx,-cam.y+shy);
 
@@ -1043,6 +1053,14 @@ function draw(){
     ctx.globalAlpha=Math.min(.55,s.life/25);ctx.fillStyle='#5c0f14';
     ctx.beginPath();ctx.ellipse(sx,sy,s.r*44,s.r*20,0,0,7);ctx.fill();ctx.globalAlpha=1;
   }
+  /* polvo levantado al correr (o salpicaduras si llueve) */
+  for(const p of puffs){
+    const sx=g2sx(p.gx,p.gy),sy=g2sy(p.gx,p.gy);
+    ctx.globalAlpha=Math.max(0,p.life)*.5;
+    ctx.fillStyle=p.wet?'#6f7f92':'#7d7259';
+    ctx.beginPath();ctx.ellipse(sx,sy-4,p.r*22,p.r*11,0,0,7);ctx.fill();
+  }
+  ctx.globalAlpha=1;
   /* cadáveres */
   for(const c of corpses){
     const sx=g2sx(c.gx,c.gy),sy=g2sy(c.gx,c.gy);
@@ -1178,6 +1196,8 @@ function draw(){
   ctx.textAlign='left';
   ctx.restore();
 
+  gradeOverlay();                                  // tinte cálido/frío según la hora
+
   /* oscuridad + linterna */
   const dk=darkness();
   if(dk>.02&&started){
@@ -1188,7 +1208,8 @@ function draw(){
     let g=lctx.createRadialGradient(px,py,8,px,py,85);
     g.addColorStop(0,'rgba(0,0,0,.85)');g.addColorStop(1,'rgba(0,0,0,0)');
     lctx.fillStyle=g;lctx.beginPath();lctx.arc(px,py,85,0,7);lctx.fill();
-    const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir)),R=280,half=.55;
+    const fogR=1-foggy()*.4;                        // la niebla acorta tu visión
+    const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir)),R=280*fogR,half=.55;
     g=lctx.createRadialGradient(px,py,20,px,py,R);
     g.addColorStop(0,'rgba(0,0,0,.95)');g.addColorStop(1,'rgba(0,0,0,0)');
     lctx.fillStyle=g;
@@ -1208,6 +1229,8 @@ function draw(){
     lctx.globalCompositeOperation='source-over';
     ctx.drawImage(lightC,0,0,VW,VH);
   }
+  drawAmbient(shx,shy);                             // motas de día / luciérnagas de noche
+  drawWeather();                                    // lluvia y niebla en pantalla
   if(player.sleeping){
     ctx.fillStyle='rgba(4,6,12,.62)';ctx.fillRect(0,0,VW,VH);
     ctx.fillStyle='#c8d3b0';ctx.font='20px Courier New';ctx.textAlign='center';
@@ -1217,6 +1240,55 @@ function draw(){
     ctx.textAlign='left';
   }
   drawMini();
+}
+// Gradación de color: cálida al amanecer/atardecer, fría de noche, neutra al mediodía.
+function gradeOverlay(){
+  const h=(12+tOfDay()*24)%24;
+  let col,a;
+  if(h<5||h>=21){col='#12203f';a=.30;}             // noche (azul frío)
+  else if(h<7){col='#ff9a4d';a=.34;}               // amanecer
+  else if(h<9){col='#ffdca6';a=.18;}
+  else if(h<16){return;}                            // mediodía neutro
+  else if(h<18.5){col='#ffc07a';a=.16;}            // tarde dorada
+  else if(h<20){col='#ff8a45';a=.32;}              // atardecer dorado
+  else{col='#ff6a3a';a=.30;}
+  ctx.save();ctx.globalCompositeOperation='soft-light';
+  ctx.globalAlpha=a;ctx.fillStyle=col;ctx.fillRect(0,0,VW,VH);ctx.restore();
+}
+function drawAmbient(shx,shy){
+  for(const p of amb){
+    const sx=g2sx(p.gx,p.gy)-cam.x+shx,sy=g2sy(p.gx,p.gy)-cam.y+shy-18;
+    if(sx<-10||sx>VW+10||sy<-10||sy>VH+10)continue;
+    const tw=Math.sin(p.ph)*.5+.5;
+    if(p.night){                                    // luciérnagas
+      ctx.globalAlpha=(.3+tw*.7)*Math.min(1,p.life);
+      ctx.fillStyle='#c8e87a';
+      ctx.beginPath();ctx.arc(sx,sy,1.8,0,7);ctx.fill();
+      ctx.globalAlpha*=.4;ctx.beginPath();ctx.arc(sx,sy,4.5,0,7);ctx.fill();
+    }else{                                          // motas de polvo/polen
+      ctx.globalAlpha=(.12+tw*.16)*Math.min(1,p.life);
+      ctx.fillStyle='#e8e6d0';
+      ctx.fillRect(sx,sy,1.6,1.6);
+    }
+  }
+  ctx.globalAlpha=1;
+}
+function drawWeather(){
+  const it=weather?weather.inten:0;
+  if(weather&&weather.type==='rain'&&it>.02){
+    ctx.strokeStyle='rgba(155,180,210,'+(.2+it*.28)+')';ctx.lineWidth=1;
+    ctx.beginPath();
+    const t=gameTime,n=Math.floor(it*230*(VW/900));
+    for(let i=0;i<n;i++){
+      const x=(i*137.5+t*760)%(VW+40)-20,y=(i*97.3+t*1180)%(VH+40)-20;
+      ctx.moveTo(x,y);ctx.lineTo(x-6,y+15);
+    }
+    ctx.stroke();
+    ctx.fillStyle='rgba(38,52,78,'+it*.14+')';ctx.fillRect(0,0,VW,VH);
+  }
+  if(weather&&weather.type==='fog'&&it>.02){
+    ctx.fillStyle='rgba(150,158,150,'+it*.32+')';ctx.fillRect(0,0,VW,VH);
+  }
 }
 function drawMini(){
   mctx.drawImage(miniBase,0,0);
@@ -1540,6 +1612,44 @@ function drawBarr(b){
     ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-38,24*(b.hp/130),3);}
 }
 
+/* ================= ATMÓSFERA (clima · ambiente · movilidad) ================= */
+// El clima empeora conforme avanzan los días (el mundo se degrada).
+function rollWeather(){
+  const day=dayNum(),r=Math.random();
+  const bad=Math.min(.6,.22+day*.05);            // más lluvia/niebla con el tiempo
+  if(r<1-bad){weather.type='clear';weather.target=0;}
+  else if(r<1-bad*.38){weather.type='rain';weather.target=rand(.55,1);}
+  else{weather.type='fog';weather.target=rand(.4,.85);}
+  weather.t=rand(35,80);
+  const nm={clear:'☀️ El cielo se despeja',rain:'🌧️ Empieza a llover…',fog:'🌫️ Baja la niebla'};
+  if(started)msg(nm[weather.type]);
+}
+function updateWeather(dt){
+  weather.t-=dt;
+  if(weather.t<=0)rollWeather();
+  weather.inten=lerp(weather.inten,weather.target,1-Math.pow(.25,dt));
+}
+const raining=()=>weather&&weather.type==='rain'&&weather.inten>.3;
+const foggy=()=>weather&&weather.type==='fog'?weather.inten:0;
+function updateAmbient(dt){
+  const night=isNight(),want=night?12:16;
+  for(let g=0;g<2&&amb.length<want;g++)
+    amb.push({gx:player.gx+rand(-15,15),gy:player.gy+rand(-10,10),
+      vx:rand(-.35,.35),vy:rand(-.25,.25),ph:rand(0,7),life:rand(4,9),night});
+  for(const p of amb){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.ph+=dt*2.2;p.life-=dt;
+    if(hyp(p.gx-player.gx,p.gy-player.gy)>19)p.life=0;}
+  amb=amb.filter(p=>p.life>0);
+  for(const p of puffs){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.r+=dt*1.6;p.life-=dt;}
+  puffs=puffs.filter(p=>p.life>0);
+}
+function footPuff(){                              // polvo al correr/frenar en tierra
+  if(puffs.length>40)return;
+  const fl=FLOOR[idx(clamp(Math.floor(player.gx),0,MW-1),clamp(Math.floor(player.gy),0,MH-1))];
+  if(fl===6)return;                              // no en madera de interiores
+  puffs.push({gx:player.gx+rand(-.1,.1),gy:player.gy+rand(-.1,.1),
+    vx:rand(-.3,.3),vy:rand(-.3,.3),r:rand(.1,.2),life:rand(.4,.7),wet:raining()});
+}
+
 /* ================= FABRICACIÓN ================= */
 // Materiales: se saquean de muebles temáticos (roperos→tela, casilleros→
 // chatarra, botiquines→alcohol) o talando árboles (madera).
@@ -1711,6 +1821,8 @@ function catadorTaste(dt){
     if(player[k]<0||!finite(player[k])){
       catLog('warn','Recurso "'+k+'" inválido → 0');player[k]=0;CAT.fixes++;}}
   if(fires&&fires.length>40){catLog('warn','Fogatas desbocadas → poda');fires.length=40;CAT.fixes++;}
+  if(amb&&amb.length>60){amb.length=30;CAT.fixes++;}
+  if(puffs&&puffs.length>80){puffs.length=40;CAT.fixes++;}
   // los acompañantes: zombis y autos
   let bad=0;
   for(let i=zombies.length-1;i>=0;i--){const z=zombies[i];
