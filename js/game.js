@@ -877,18 +877,66 @@ function makeTile(key,base,fn){
   t.restore();TILES[key]=c;
 }
 function buildTiles(){
+  const R=(a,b)=>a+Math.random()*(b-a);
   const speck=(t,cols,n)=>{for(let i=0;i<n;i++){t.fillStyle=cols[irand(0,cols.length)];
-    t.beginPath();t.arc(rand(-HW,HW),rand(0,HH*2),rand(.8,2.2),0,7);t.fill();}};
-  for(let v=0;v<4;v++)makeTile('g'+v,['#2b3520','#28331f','#2e3a23','#26301c'][v],
-    t=>speck(t,['#1f2818','#33402a','#24301b'],26));
-  makeTile('road','#3a3a38',t=>{speck(t,['#333331','#424240'],14);});
-  makeTile('roadm','#3a3a38',t=>{speck(t,['#333331','#424240'],12);
-    t.fillStyle='#8a8a7c';t.fillRect(-3,HH-2,6,4);});
-  makeTile('wood','#6a5232',t=>{t.strokeStyle='rgba(0,0,0,.25)';t.lineWidth=1;
-    for(let k=-2;k<3;k++){t.beginPath();t.moveTo(-HW+k*4,HH+k*8-HH);t.lineTo(k*10,0+k*5+HH);t.stroke();}
-    speck(t,['#5c4629','#78603c'],8);});
-  makeTile('side','#55554e',t=>speck(t,['#4c4c46','#5e5e56'],10));
-  makeTile('dirt','#5a4a34',t=>speck(t,['#4c3e2a','#6a583e'],14));
+    t.beginPath();t.arc(R(-HW,HW),R(0,HH*2),R(.6,2),0,7);t.fill();}};
+  const patch=(t,col,n,sz)=>{for(let i=0;i<n;i++){const x=R(-HW+6,HW-6),y=R(4,HH*2-4);
+    t.fillStyle=col;t.beginPath();
+    for(let k=0;k<6;k++){const a=k/6*6.283,r=sz*R(.55,1.15);
+      const px=x+Math.cos(a)*r,py=y+Math.sin(a)*r*.5;k?t.lineTo(px,py):t.moveTo(px,py);}
+    t.closePath();t.fill();}};
+  const crack=(t,col,n)=>{t.strokeStyle=col;t.lineWidth=1;
+    for(let i=0;i<n;i++){let x=R(-HW+4,HW-4),y=R(3,HH*2-3);t.beginPath();t.moveTo(x,y);
+      const seg=irand(2,4);for(let k=0;k<seg;k++){x+=R(-7,7);y+=R(-4,4);t.lineTo(x,y);}t.stroke();}};
+  const tuft=(t,cols,n)=>{for(let i=0;i<n;i++){const x=R(-HW,HW),y=R(3,HH*2-3);
+    t.strokeStyle=cols[irand(0,cols.length)];t.lineWidth=1;
+    for(let b=0;b<3;b++){t.beginPath();t.moveTo(x,y);t.lineTo(x+R(-2.5,2.5),y-R(2,4.5));t.stroke();}}};
+  // PASTO: muted, con parches de tierra, matas y piedritas
+  const gbase=['#2c3420','#29321e','#313a25','#252d1b'];
+  const gspeck=['#222b18','#37422b','#2a331d','#3d4a30'];
+  for(let v=0;v<4;v++)makeTile('g'+v,gbase[v],t=>{
+    speck(t,gspeck,30);
+    if(Math.random()<.6)patch(t,'rgba(74,62,40,.45)',1,9);       // tierra
+    tuft(t,['#3f4d2c','#4a5836','#354328'],13);
+    speck(t,['#5c5344','#6b6252'],4);                            // piedritas
+  });
+  // ASFALTO: grietas, manchas de aceite, gravilla
+  makeTile('road','#34342f',t=>{
+    speck(t,['#2c2c28','#3d3d38','#414139'],20);
+    crack(t,'rgba(18,18,16,.55)',3);
+    patch(t,'rgba(14,14,13,.4)',2,7);                            // aceite
+    speck(t,['#4a4a42','#565650'],6);
+  });
+  makeTile('roadm','#34342f',t=>{
+    speck(t,['#2c2c28','#3d3d38'],16);
+    crack(t,'rgba(18,18,16,.5)',2);
+    t.fillStyle='#8a8248';t.fillRect(-4,HH-2.5,8,5);             // línea central gastada
+    t.fillStyle='rgba(52,52,47,.55)';t.fillRect(-4,HH-2.5,3,5);
+  });
+  // MADERA interior: tablas con juntas, vetas y nudos
+  makeTile('wood','#63502f',t=>{
+    t.strokeStyle='rgba(0,0,0,.32)';t.lineWidth=1.4;
+    for(let k=-3;k<4;k++){t.beginPath();t.moveTo(-HW+k*9,HH+k*4.5-HH);t.lineTo(k*9+HW,HH+k*4.5);t.stroke();}
+    t.strokeStyle='rgba(58,42,24,.55)';t.lineWidth=.8;
+    for(let k=-3;k<4;k++){t.beginPath();t.moveTo(-HW+k*9+3,HH+k*4.5-HH+2);t.lineTo(k*9+HW,HH+k*4.5+2);t.stroke();}
+    speck(t,['#54401f','#75593a','#4a3820'],10);
+    t.fillStyle='rgba(46,32,18,.7)';
+    for(let i=0;i<2;i++){t.beginPath();t.ellipse(R(-HW+6,HW-6),R(4,HH*2-4),2.5,1.5,0,0,7);t.fill();}
+  });
+  // BANQUETA: losas de concreto con junta y grietas
+  makeTile('side','#53534b',t=>{
+    speck(t,['#494943','#5d5d55','#47473e'],12);
+    t.strokeStyle='rgba(0,0,0,.3)';t.lineWidth=1;
+    t.beginPath();t.moveTo(0,0);t.lineTo(0,HH*2);t.moveTo(-HW,HH);t.lineTo(HW,HH);t.stroke();
+    crack(t,'rgba(28,28,26,.4)',1);
+    if(Math.random()<.5)patch(t,'rgba(40,38,30,.3)',1,6);
+  });
+  // TIERRA: pedregosa
+  makeTile('dirt','#57472f',t=>{
+    speck(t,['#493c28','#67553b','#40331d'],18);
+    patch(t,'rgba(38,30,18,.4)',2,7);
+    speck(t,['#786a52','#8a7a62'],5);
+  });
 }
 const FKEY=['g0','g1','g2','g3','road','roadm','wood','side','dirt'];
 
@@ -912,6 +960,12 @@ function cube(i,j,h,cols,inset){
   ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=1;ctx.stroke();
   return {ax,ay,bx,by,cx:cx2,cy:cy2,dx,dy};
 }
+// sombra de contacto que asienta un objeto en el suelo
+function groundShadow(gx,gy,rx,ry){
+  const sx=g2sx(gx+.5,gy+.5),sy=g2sy(gx+.5,gy+.5);
+  ctx.fillStyle='rgba(0,0,0,.24)';
+  ctx.beginPath();ctx.ellipse(sx,sy+2,rx,ry,0,0,7);ctx.fill();
+}
 function drawWall(st,night){
   const p=cube(st.gx,st.gy,WALLH,HUES[st.hue]);
   // revestimiento horizontal en ambas caras
@@ -927,6 +981,14 @@ function drawWall(st,night){
   ctx.fillStyle='rgba(255,252,240,.09)';
   ctx.beginPath();ctx.moveTo(p.dx,p.dy-WALLH);ctx.lineTo(p.cx,p.cy-WALLH);ctx.lineTo(p.cx,p.cy-WALLH+4);ctx.lineTo(p.dx,p.dy-WALLH+4);ctx.closePath();ctx.fill();
   ctx.beginPath();ctx.moveTo(p.cx,p.cy-WALLH);ctx.lineTo(p.bx,p.by-WALLH);ctx.lineTo(p.bx,p.by-WALLH+4);ctx.lineTo(p.cx,p.cy-WALLH+4);ctx.closePath();ctx.fill();
+  // regueros de suciedad/humedad (estables por muro)
+  ctx.fillStyle='rgba(18,14,9,.13)';
+  for(const[e0x,e0y,e1x,e1y,fr]of[[p.dx,p.dy,p.cx,p.cy,.34],[p.dx,p.dy,p.cx,p.cy,.7],
+      [p.cx,p.cy,p.bx,p.by,.4],[p.cx,p.cy,p.bx,p.by,.72]]){
+    const tx=lerp(e0x,e1x,fr),ty=lerp(e0y,e1y,fr);
+    ctx.beginPath();ctx.moveTo(tx-1.4,ty-WALLH+3);ctx.lineTo(tx+1.4,ty-WALLH+3);
+    ctx.lineTo(tx+1.4,ty-2);ctx.lineTo(tx-1.4,ty-2);ctx.closePath();ctx.fill();
+  }
   if(st.win){
     const glow=night?'rgba(232,197,107,.92)':'rgba(140,170,190,.85)';
     ctx.fillStyle=glow;
@@ -947,6 +1009,7 @@ function drawWall(st,night){
 function drawFurn(st){
   const f=st.o,F=FURN[f.type],ty=f.type;
   const sx=g2sx(st.gx+.5,st.gy+.5),sy=g2sy(st.gx+.5,st.gy+.5);
+  groundShadow(st.gx,st.gy,14,7);
   // muebles bajos (mesa, cama, camilla) se dibujan como tablero + patas,
   // no como bloque; el resto como armario con detalle.
   if(ty==='mesa'){
@@ -1008,18 +1071,23 @@ function drawFurn(st){
 }
 function drawCrate(st){
   const c=st.o;
+  groundShadow(st.gx,st.gy,11,6);
   cube(st.gx,st.gy,14,c.looted?['#3d3d36','#33332c','#46463e']:['#6b4f2a','#57401f','#7d5f38'],.7);
   if(!c.looted){const sx=g2sx(st.gx+.5,st.gy+.5),sy=g2sy(st.gx+.5,st.gy+.5);
     ctx.fillStyle='#d9c26a';ctx.beginPath();ctx.arc(sx,sy-20,2.5,0,7);ctx.fill();}
 }
 function drawTree(st,fade){
   const i=st.gx,j=st.gy,s=st.s;
-  cube(i,j,12,['#4a3620','#3a2a18','#5c4628'],.34);
   const sx=g2sx(i+.5,j+.5),sy=g2sy(i+.5,j+.5);
+  ctx.fillStyle='rgba(0,0,0,.2)';                       // sombra de la copa en el suelo
+  ctx.beginPath();ctx.ellipse(sx+5,sy+1,22*s,11*s,0,0,7);ctx.fill();
+  cube(i,j,12,['#4a3620','#3a2a18','#5c4628'],.34);
   if(fade)ctx.globalAlpha=.36;
-  ctx.fillStyle='#1d2b18';ctx.beginPath();ctx.ellipse(sx+3,sy-26*s,24*s,17*s,0,0,7);ctx.fill();
-  ctx.fillStyle='#26381f';ctx.beginPath();ctx.ellipse(sx-3,sy-33*s,19*s,14*s,0,0,7);ctx.fill();
-  ctx.fillStyle='#2f4527';ctx.beginPath();ctx.ellipse(sx-6,sy-38*s,11*s,8*s,0,0,7);ctx.fill();
+  ctx.fillStyle='#182415';ctx.beginPath();ctx.ellipse(sx+3,sy-25*s,24*s,17*s,0,0,7);ctx.fill();
+  ctx.fillStyle='#223318';ctx.beginPath();ctx.ellipse(sx-2,sy-32*s,19*s,14*s,0,0,7);ctx.fill();
+  ctx.fillStyle='#2c421f';ctx.beginPath();ctx.ellipse(sx-6,sy-37*s,12*s,9*s,0,0,7);ctx.fill();
+  ctx.fillStyle='rgba(120,150,80,.5)';                  // luz moteada (estable)
+  for(let k=0;k<4;k++)ctx.fillRect(sx-10*s+k*5*s,sy-40*s+Math.sin(i*3+k*2)*3,2,2);
   ctx.globalAlpha=1;
 }
 // Tipos de vehículo: medidas (medio largo/ancho en tiles), alturas de
