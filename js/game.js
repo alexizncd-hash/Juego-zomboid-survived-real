@@ -143,7 +143,9 @@ function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
   const doorI=bx+Math.floor(bw/2),wide=bw>=10;
   const doors=[{i:doorI,j:by+bh-1}];
   if(wide)doors.push({i:doorI+1,j:by+bh-1});
-  const b={x:bx,y:by,w:bw,h:bh,hue,type:btype,name:bname,doors};
+  const roofs=['#6b4a3a','#7a4636','#5a4a42','#4a5058','#6a5a3a','#814f3c'];
+  const b={x:bx,y:by,w:bw,h:bh,hue,type:btype,name:bname,doors,
+    roofCol:btype?'#4d5259':roofs[irand(0,roofs.length)],_roofA:1};
   buildings.push(b);
   for(let j=by;j<by+bh;j++)for(let i=bx;i<bx+bw;i++){
     const edge=(i===bx||i===bx+bw-1||j===by||j===by+bh-1);
@@ -966,6 +968,49 @@ function groundShadow(gx,gy,rx,ry){
   ctx.fillStyle='rgba(0,0,0,.24)';
   ctx.beginPath();ctx.ellipse(sx,sy+2,rx,ry,0,0,7);ctx.fill();
 }
+// Techo a cuatro aguas sobre el edificio. Se desvanece cuando el jugador
+// está dentro, para revelar el interior (como en Project Zomboid).
+function drawRoof(b){
+  const a=b._roofA;if(a<=.02)return;
+  const o=.4,peak=24,wt=WALLH;
+  const x0=b.x-o,y0=b.y-o,x1=b.x+b.w+o,y1=b.y+b.h+o;
+  const P=(gx,gy,z)=>[g2sx(gx,gy),g2sy(gx,gy)-z];
+  const eNW=P(x0,y0,wt),eNE=P(x1,y0,wt),eSE=P(x1,y1,wt),eSW=P(x0,y1,wt);
+  let rA,rB;
+  if((x1-x0)>=(y1-y0)){const my=(y0+y1)/2,ins=(y1-y0)/2;
+    rA=P(x0+ins,my,wt+peak);rB=P(x1-ins,my,wt+peak);}
+  else{const mx=(x0+x1)/2,ins=(x1-x0)/2;
+    rA=P(mx,y0+ins,wt+peak);rB=P(mx,y1-ins,wt+peak);}
+  ctx.globalAlpha=a;
+  const col=b.roofCol||'#6b4a3a';
+  const faces=[
+    [[eNW,eNE,rB,rA],shade(col,14)],     // agua norte (iluminada)
+    [[eNE,rB,eSE],shade(col,-4)],         // limahoya este
+    [[eNW,rA,eSW],shade(col,-16)],        // limahoya oeste
+    [[eSW,rA,rB,eSE],shade(col,-30)]      // agua sur (sombra)
+  ];
+  for(const[pts,c]of faces){
+    ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);
+    for(let k=1;k<pts.length;k++)ctx.lineTo(pts[k][0],pts[k][1]);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=1;ctx.stroke();
+  }
+  // líneas de tejas en las dos aguas grandes
+  ctx.strokeStyle='rgba(0,0,0,.14)';ctx.lineWidth=1;
+  for(let s=1;s<5;s++){
+    const t=s/5;
+    ctx.beginPath();
+    ctx.moveTo(lerp(eNW[0],rA[0],t),lerp(eNW[1],rA[1],t));
+    ctx.lineTo(lerp(eNE[0],rB[0],t),lerp(eNE[1],rB[1],t));ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(lerp(eSW[0],rA[0],t),lerp(eSW[1],rA[1],t));
+    ctx.lineTo(lerp(eSE[0],rB[0],t),lerp(eSE[1],rB[1],t));ctx.stroke();
+  }
+  // cumbrera
+  ctx.strokeStyle=shade(col,26);ctx.lineWidth=2.4;
+  ctx.beginPath();ctx.moveTo(rA[0],rA[1]);ctx.lineTo(rB[0],rB[1]);ctx.stroke();
+  ctx.globalAlpha=1;
+}
 function drawWall(st,night){
   const p=cube(st.gx,st.gy,WALLH,HUES[st.hue]);
   // revestimiento horizontal en ambas caras
@@ -1367,6 +1412,17 @@ function draw(){
     items.push({kind:'barr',o:b,d:b.gx+b.gy,_sx:sx,_sy:sy});
   }
   if(!inCar)items.push({kind:'ply',d:pD,_sx:psx,_sy:psy});
+  // techos: se ordenan por su esquina frontal para que el jugador afuera
+  // nunca quede tapado; se desvanecen si estás dentro del edificio
+  for(const b of buildings){
+    const inside=player.gx>=b.x-.6&&player.gx<=b.x+b.w+.6&&
+                 player.gy>=b.y-.6&&player.gy<=b.y+b.h+.6;
+    b._roofA=lerp(b._roofA,inside?0:1,.16);
+    if(b._roofA<=.02)continue;
+    const cx=g2sx(b.x+b.w/2,b.y+b.h/2),cy=g2sy(b.x+b.w/2,b.y+b.h/2)-WALLH-24;
+    if(cx<cam.x-260||cx>cam.x+VW+260||cy<cam.y-160||cy>cam.y+VH+220)continue;
+    items.push({kind:'roof',o:b,d:(b.x+b.w)+(b.y+b.h)+.5});
+  }
   items.sort((a,b)=>a.d-b.d);
 
   for(const it of items){
@@ -1380,6 +1436,7 @@ function draw(){
     else if(it.kind==='crate')drawCrate(it);
     else if(it.kind==='carD')drawCar(it.o);
     else if(it.kind==='fire')drawFire(it.o,it._sx,it._sy);
+    else if(it.kind==='roof')drawRoof(it.o);
     else if(it.kind==='barr')drawBarr(it.o);
     else if(it.kind==='zom'){
       const z=it.o;
