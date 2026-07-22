@@ -14,7 +14,7 @@ const DOM={
   waterFill:document.querySelector('#fWater .fill'),
   staFill:document.querySelector('#fSta .fill'),
   wName:$('wName'),ammo:$('ammo'),rWood:$('rWood'),rGas:$('rGas'),
-  rScrap:$('rScrap'),rCloth:$('rCloth'),rAlc:$('rAlc'),rRaw:$('rRaw'),rArm:$('rArm'),
+  rScrap:$('rScrap'),rCloth:$('rCloth'),rAlc:$('rAlc'),rRaw:$('rRaw'),rArm:$('rArm'),rTools:$('rTools'),
   obj:$('obj'),dDay:$('dDay'),dKills:$('dKills'),dHour:$('dHour'),
   dIcon:$('dIcon'),hint:$('hint'),dmg:$('dmg'),
   btnLoot:$('btnLoot'),btnGun:$('btnGun'),btnCar:$('btnCar'),
@@ -129,15 +129,25 @@ const FURN={
   alacena:{h:30,c:['#8a6a3c','#6b4f2a'],label:'alacena'},
   ropero:{h:36,c:['#5c4426','#463317'],label:'ropero'},
   cama:{h:12,c:['#a34a52','#7a333b'],label:'cama'},
-  mesa:{h:16,c:['#9a7a4a','#79603a'],label:'mesa'}
+  mesa:{h:16,c:['#9a7a4a','#79603a'],label:'mesa'},
+  herramienta:{h:34,c:['#7a5a3a','#5c4326'],label:'estante de herramientas'},
+  vitrina:{h:28,c:['#b8c4cc','#8f9aa0'],label:'vitrina'}
 };
+// herramientas: se saquean (sobre todo en la ferretería y garages) y se
+// NECESITAN para ciertas recetas — "cada estructura con sus herramientas".
+const TOOLS={hammer:{ic:'🔨',n:'Martillo'},saw:{ic:'🪚',n:'Serrucho'},
+  screw:{ic:'🪛',n:'Destornillador'},wrench:{ic:'🔧',n:'Llave inglesa'}};
 
 const EP={x:MW-9,y:9};
 const SPECIALS=[
   {type:'tienda',w:12,h:8,hue:1,name:'ABARROTES',furn:['estante','estante','estante','estante','nevera','mesa']},
   {type:'gasolinera',w:7,h:5,hue:2,name:'GASOLINERA',furn:['alacena','mesa'],pumps:true},
   {type:'hospital',w:12,h:9,hue:0,name:'CLINICA',furn:['camilla','camilla','botiquin','botiquin','cama','camilla']},
-  {type:'comisaria',w:10,h:8,hue:2,name:'COMISARIA',furn:['casillero','casillero','casillero','mesa','alacena']}
+  {type:'comisaria',w:10,h:8,hue:2,name:'COMISARIA',furn:['casillero','casillero','casillero','mesa','alacena']},
+  {type:'ferreteria',w:9,h:7,hue:1,name:'FERRETERIA',furn:['herramienta','herramienta','estante','estante','alacena','mesa']},
+  {type:'farmacia',w:8,h:6,hue:0,name:'FARMACIA',furn:['botiquin','botiquin','vitrina','estante','estante']},
+  {type:'barberia',w:7,h:5,hue:2,name:'BARBERIA',furn:['vitrina','mesa','ropero','estante']},
+  {type:'carcel',w:11,h:8,hue:2,name:'CARCEL',furn:['casillero','casillero','cama','cama','mesa','alacena']}
 ];
 function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
   const doorI=bx+Math.floor(bw/2),wide=bw>=10;
@@ -168,7 +178,7 @@ function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
     const sp=spots.splice(irand(0,spots.length),1)[0];
     if(SOLID[idx(sp[0],sp[1])])continue;
     SOLID[idx(sp[0],sp[1])]=4;
-    furns.push({gx:sp[0],gy:sp[1],type:furnTypes[k],looted:false,rt:0});
+    furns.push({gx:sp[0],gy:sp[1],type:furnTypes[k],looted:false,rt:0,bt:btype});
   }
   return b;
 }
@@ -183,27 +193,29 @@ function genWorld(){
     if(FLOOR[idx(rx+1,j)]<4)FLOOR[idx(rx+1,j)]=4;
     if(FLOOR[idx(rx-1,j)]<4)FLOOR[idx(rx-1,j)]=7;
     if(FLOOR[idx(rx+2,j)]<4)FLOOR[idx(rx+2,j)]=7;}
-  // edificios especiales cerca del cruce
-  const spPos=[[rx-18,ry-12],[rx+5,ry-9],[rx+6,ry+5],[rx-15,ry+6]];
+  // edificios especiales repartidos por el pueblo (barrios alrededor del cruce)
   for(let k=0;k<SPECIALS.length;k++){
     const sp=SPECIALS[k];let placed=false;
-    const cands=[spPos[k],[spPos[k][0]+3,spPos[k][1]+3],[spPos[k][0]-3,spPos[k][1]-2]];
-    for(const[cx0,cy0]of cands){
-      const bx=clamp(cx0,4,MW-sp.w-4),by=clamp(cy0,4,MH-sp.h-4);
+    for(let t=0;t<300&&!placed;t++){
+      // primeros intentos cerca del centro urbano, luego más lejos
+      const spread=8+Math.min(30,t*.2);
+      const bx=clamp(Math.round(rx+rand(-spread,spread)),4,MW-sp.w-4);
+      const by=clamp(Math.round(ry+rand(-spread,spread)),4,MH-sp.h-4);
+      if(hyp(bx+sp.w/2-EP.x,by+sp.h/2-EP.y)<8)continue;
       let ok=true;
       for(let j=by-2;j<by+sp.h+2&&ok;j++)for(let i=bx-2;i<bx+sp.w+2;i++){
         if(SOLID[idx(i,j)]||FLOOR[idx(i,j)]>=4){ok=false;break;}}
       if(!ok)continue;
-      const b=carveBuilding(bx,by,sp.w,sp.h,sp.hue,sp.furn,sp.type,sp.name);
+      carveBuilding(bx,by,sp.w,sp.h,sp.hue,sp.furn,sp.type,sp.name);
       if(sp.pumps){
         for(const off of[1,4]){
           const pi=bx+off,pj=by+sp.h+1;
           if(!SOLID[idx(pi,pj)]&&FLOOR[idx(pi,pj)]<4){
             SOLID[idx(pi,pj)]=4;
-            furns.push({gx:pi,gy:pj,type:'bomba',looted:false,rt:0});}
+            furns.push({gx:pi,gy:pj,type:'bomba',looted:false,rt:0,bt:sp.type});}
         }
       }
-      placed=true;break;
+      placed=true;
     }
     if(!placed)console.warn('no cupo',sp.type);
   }
@@ -273,7 +285,8 @@ function buildMini(){
       f>=4&&f<6?'#3a3a38':f===6?'#5a4630':f===7?'#55554e':'#26301c';
     c.fillRect(i*k,j*k,k+.5,k+.5);
   }
-  const tint={tienda:'#c9863a',gasolinera:'#c94a3a',hospital:'#d9d9d9',comisaria:'#5a7ac9'};
+  const tint={tienda:'#c9863a',gasolinera:'#c94a3a',hospital:'#d9d9d9',comisaria:'#5a7ac9',
+    ferreteria:'#c9a83a',farmacia:'#4ac97a',barberia:'#c95a9a',carcel:'#8a8a8a'};
   c.globalAlpha=.5;
   for(const b of buildings)if(b.type){c.fillStyle=tint[b.type]||'#fff';
     c.fillRect(b.x*k,b.y*k,b.w*k,b.h*k);}
@@ -290,6 +303,7 @@ function init(){
     scrap:0,cloth:0,alcohol:0,armor:0,rawFood:0,
     skills:{carp:0,mech:0,elec:0,med:0,str:0},
     xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
+    tools:{hammer:false,saw:false,screw:false,wrench:false},
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;skillsOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';
@@ -402,6 +416,48 @@ function maybeBook(kind){
   if(opts&&Math.random()<.12){giveBook(opts[irand(0,opts.length)]);return true;}
   return false;
 }
+function pickTool(){const ks=Object.keys(TOOLS);return ks[irand(0,ks.length)];}
+function giveTool(t){
+  if(player.tools[t]){player.scrap+=1;msg(TOOLS[t].ic+' '+TOOLS[t].n+' repetido → +1 🔩');return;}
+  player.tools[t]=true;msg(TOOLS[t].ic+' ¡Conseguiste un '+TOOLS[t].n+'!');
+  sfx(420,.2,'triangle',.06);sfx(560,.15,'triangle',.05);
+}
+// Botín sesgado por el tipo de edificio: cada estructura urbana tiene lo suyo.
+function maybeThemed(bt,kind){
+  if(!bt)return false;
+  const r=Math.random();
+  if(bt==='ferreteria'){                          // herramientas, madera, chatarra
+    if(r<.42)giveTool(pickTool());
+    else if(r<.62){player.scrap+=2;msg('🔩 Chatarra (+2)');}
+    else if(r<.8){player.wood+=2;msg('🪵 Tablones (+2)');}
+    else if(r<.9)giveGunOrAmmo();
+    else return false;
+    return true;
+  }
+  if(bt==='farmacia'){                            // medicinas
+    if(r<.4)addInv('anti','💊 Antibióticos');
+    else if(r<.75)addInv('med','🩹 Botiquín');
+    else if(r<.9){player.alcohol++;msg('🧪 Alcohol (+1)');}
+    else return false;
+    return true;
+  }
+  if(bt==='barberia'){                            // tela, alcohol, tijeras
+    if(r<.35){player.cloth+=2;msg('🧵 Tela (+2)');}
+    else if(r<.6){player.alcohol++;msg('🧪 Alcohol/loción (+1)');}
+    else if(r<.75&&player.wTier<1){equipWeapon(1);msg('✂️ Tijeras afiladas → arma');}
+    else return false;
+    return true;
+  }
+  if(bt==='carcel'){                              // armas, herramientas, algo de comida
+    if(r<.3)giveTool(pickTool());
+    else if(r<.5){player.ammo+=6;msg('🔸 Balas (+6)');}
+    else if(r<.65)giveGunOrAmmo();
+    else if(r<.8){player.scrap+=2;msg('🔩 Chatarra (+2)');}
+    else return false;
+    return true;
+  }
+  return false;                                   // otros edificios: botín normal
+}
 function rollLoot(kind){
   if(maybeBook(kind))return;
   const r=Math.random();
@@ -452,6 +508,7 @@ function rollLoot(kind){
     else{player.alcohol++;msg('🧪 Alcohol medicinal (+1)');}
   }else if(kind==='casillero'){
     if(maybeRadio(.2))return;
+    if(Math.random()<.12){giveTool(pickTool());return;}
     if(r<.3)giveGunOrAmmo();
     else if(r<.55){player.ammo+=8;msg('🔸 Caja de balas (+8)');}
     else if(r<.75){const rr=Math.random(),tier=rr<.4?2:3;
@@ -462,6 +519,7 @@ function rollLoot(kind){
     if(r<.75){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
     else msg('La bomba está seca…');
   }else if(kind==='auto'){
+    if(Math.random()<.1){giveTool('wrench');return;}   // llave en la cajuela
     if(r<.3){player.ammo+=6;msg('🔸 Balas en la guantera (+6)');}
     else if(r<.5)addInv('water','💧 Agua');
     else if(r<.65)addInv('food','🍖 Comida');
@@ -492,6 +550,7 @@ function tryLoot(){
   nl.o.looted=true;nl.o.rt=rand(90,150);
   sfx(240,.1,'triangle',.04);
   const kind=nl.o.type?nl.o.type:(nl.label==='auto'?'auto':'caja');
+  if(maybeThemed(nl.o.bt,kind))return;         // botín según el tipo de edificio
   rollLoot(kind);
 }
 function useItem(k,silent){
@@ -633,6 +692,7 @@ function loadGame(){
     if(!player.skills)player.skills={carp:0,mech:0,elec:0,med:0,str:0};
     if(!player.xp)player.xp={carp:0,mech:0,elec:0,med:0,str:0};
     if(!player.books)player.books=[];
+    if(!player.tools)player.tools={hammer:false,saw:false,screw:false,wrench:false};
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -828,6 +888,8 @@ function updateHUD(day,night){
   DOM.rAlc.textContent=player.alcohol;
   DOM.rRaw.textContent=player.rawFood;
   DOM.rArm.textContent=player.armor>0?'🦺'+Math.round(player.armor):'';
+  let ts='';for(const t in TOOLS)if(player.tools&&player.tools[t])ts+=TOOLS[t].ic;
+  DOM.rTools.textContent=ts;
   if(radioFound){DOM.obj.style.display='block';
     DOM.obj.textContent=day>=CFG.survivalDays?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!'
       :'🚁 Extracción: DÍA '+CFG.survivalDays+' · claro NE';}
@@ -1109,6 +1171,17 @@ function drawFurn(st){
       ctx.fillStyle='#7dd97d';ctx.fillRect(sx-5,topY+7,10,3);
       ctx.strokeStyle='#2a2a26';ctx.lineWidth=2;                   // manguera
       ctx.beginPath();ctx.moveTo(sx+8,topY+9);ctx.quadraticCurveTo(sx+14,sy-6,sx+11,sy);ctx.stroke();
+    }else if(ty==='herramienta'){                                  // panel con herramientas
+      ctx.strokeStyle='#c9c2b0';ctx.lineWidth=1.6;
+      ctx.beginPath();ctx.moveTo(sx-6,topY+8);ctx.lineTo(sx-6,topY+16);ctx.stroke(); // martillo
+      ctx.fillStyle='#8a5a3a';ctx.fillRect(sx-8,topY+6,5,3);
+      ctx.strokeStyle='#b9b9ad';ctx.lineWidth=2;                   // llave
+      ctx.beginPath();ctx.arc(sx+4,topY+9,2.4,0,7);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sx+4,topY+11);ctx.lineTo(sx+4,topY+18);ctx.stroke();
+    }else if(ty==='vitrina'){                                      // vidrio con reflejo
+      ctx.fillStyle='rgba(160,195,215,.5)';ctx.fillRect(sx-9,topY+5,18,F.h-8);
+      ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(sx-6,topY+7);ctx.lineTo(sx-1,topY+F.h-4);ctx.stroke();
     }
   }
   if(!f.looted){ctx.fillStyle='#d9c26a';
@@ -2063,7 +2136,7 @@ const RECIPES=[
     can:()=>player.wTier<1,why:'Ya tienes un arma igual o mejor',
     make(){equipWeapon(1);msg('🔪 Fabricaste: Tabla con clavos');}},
   {id:'hacha',ic:'🪓',n:'Hacha artesanal',d:'Arma nivel 3 · tala árboles',cost:{wood:3,scrap:4},
-    req:{carp:2},can:()=>player.wTier<3,why:'Ya tienes un arma igual o mejor',
+    req:{carp:2},tool:'saw',can:()=>player.wTier<3,why:'Ya tienes un arma igual o mejor',
     make(){equipWeapon(3);msg('🪓 Fabricaste: Hacha artesanal');}},
   {id:'vendas',ic:'🩹',n:'Vendas',d:'+1 curación (ranura 3)',cost:{cloth:2},
     make(){addInv('med','🩹 Vendas caseras');}},
@@ -2077,15 +2150,15 @@ const RECIPES=[
     can:()=>player.armor<50,why:'Tu chaleco aún está en buen estado',
     make(){player.armor=100;msg('🦺 Chaleco puesto (100)');}},
   {id:'muro',ic:'🧱',n:'Muro de madera',d:'Se levanta frente a ti · los zombis lo golpean',
-    cost:{wood:3},req:{carp:1},make:()=>placeWall()},
+    cost:{wood:3},req:{carp:1},tool:'hammer',make:()=>placeWall()},
   {id:'cama',ic:'🛏️',n:'Cama improvisada',d:'Se coloca frente a ti · sirve para dormir',
-    cost:{wood:4,cloth:2},req:{carp:1},make:()=>placeBed()},
+    cost:{wood:4,cloth:2},req:{carp:1},tool:'hammer',make:()=>placeBed()},
   {id:'fogata',ic:'🔥',n:'Fogata',d:'Cocina carne cruda y da luz de noche',
     cost:{wood:2,scrap:1},make:()=>placeFire()},
   {id:'generador',ic:'💡',n:'Generador',d:'Da luz de noche sin fuego, en un área amplia',
-    cost:{scrap:4,wood:2},req:{elec:2},make:()=>placeGen()},
+    cost:{scrap:4,wood:2},req:{elec:2},tool:'screw',make:()=>placeGen()},
   {id:'reparauto',ic:'🚗',n:'Reparar auto',d:'Repara el auto que tengas al lado',
-    cost:{scrap:3},req:{mech:1},
+    cost:{scrap:3},req:{mech:1},tool:'wrench',
     can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
     make:()=>repairCar()},
   {id:'reparar',ic:'🔧',n:'Reparar arma',d:'Restaura la condición del arma equipada',
@@ -2160,13 +2233,16 @@ function canAfford(rec){
   return true;
 }
 function meetsReq(rec){
+  if(rec.tool&&!(player.tools&&player.tools[rec.tool]))return false;
   if(!rec.req)return true;
   for(const s in rec.req)if(sk(s)<rec.req[s])return false;
   return true;
 }
 function reqText(rec){
-  if(!rec.req)return'';
-  return Object.keys(rec.req).map(s=>SKILL_NAMES[s]+' '+rec.req[s]).join(' · ');
+  const parts=[];
+  if(rec.req)for(const s in rec.req)parts.push(SKILL_NAMES[s]+' '+rec.req[s]);
+  if(rec.tool)parts.push(TOOLS[rec.tool].ic+' '+TOOLS[rec.tool].n);
+  return parts.join(' · ');
 }
 function craftItem(id){
   const rec=RECIPES.find(r=>r.id===id);if(!rec)return;
