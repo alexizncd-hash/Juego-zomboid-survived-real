@@ -104,7 +104,7 @@ function sfx(f,d,type,g,slide){if(muted)return;try{
 /* ================= MAPA ================= */
 // FLOOR: 0-3 pasto, 4 asfalto, 5 asfalto c/línea, 6 madera, 7 banqueta, 8 tierra
 // SOLID: 0 libre, 1 muro, 2 ventana, 3 árbol, 4 objeto (mueble/caja/auto)
-let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics;
+let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics,props;
 let player,zombies,corpses,parts,pools,shots,dmgs,cam;
 let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOpen=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
@@ -271,7 +271,7 @@ function furnishRooms(rooms,furnTypes,btype,doorTiles,doors){
 }
 function genWorld(){
   FLOOR=new Uint8Array(MW*MH);SOLID=new Uint8Array(MW*MH);WHUE=new Uint8Array(MW*MH);
-  buildings=[];furns=[];crates=[];cars=[];treesL=[];statics=[];
+  buildings=[];furns=[];crates=[];cars=[];treesL=[];statics=[];props=[];
   for(let j=0;j<MH;j++)for(let i=0;i<MW;i++)FLOOR[idx(i,j)]=irand(0,4);
   const ry=Math.floor(MH/2),rx=Math.floor(MW/2);
   // ── retícula de calles (avenidas cada ~20 tiles) que forma manzanas ──
@@ -359,8 +359,40 @@ function genWorld(){
     if(!SOLID[idx(i,j)]&&FLOOR[idx(i,j)]!==6){
       SOLID[idx(i,j)]=4;crates.push({gx:i,gy:j,looted:false,rt:0});break;}
   }
+  // ── mobiliario urbano sobre las banquetas (FLOOR===7) ──
+  placeStreetProps(roadRows,roadCols);
   buildStatics();
   buildMini();
+}
+// Mobiliario urbano: postes de luz (alumbran de noche), contenedores,
+// hidrantes y bancas sobre las banquetas (FLOOR===7) que bordean las calles.
+function placeStreetProps(roadRows,roadCols){
+  const near=(i,j)=>{                                // ¿hay ya un prop pegado?
+    for(const p of props)if(Math.abs(p.gx-i)<2&&Math.abs(p.gy-j)<2)return true;return false;};
+  const sidewalk=(i,j)=>i>0&&j>0&&i<MW&&j<MH&&FLOOR[idx(i,j)]===7&&!SOLID[idx(i,j)];
+  const dist=(i,j)=>Math.hypot(i-EP.x,j-EP.y);
+  // postes de luz: a intervalos por cada calle horizontal y vertical
+  for(const y of roadRows)for(let i=4;i<MW-4;i+=irand(6,8)){
+    const jj=Math.random()<.5?y-1:y+2;              // una u otra banqueta
+    if(sidewalk(i,jj)&&!near(i,jj)&&dist(i,jj)>4){
+      props.push({gx:i,gy:jj,type:'lamp',hue:irand(0,3),on:true});}
+  }
+  for(const x of roadCols)for(let j=4;j<MH-4;j+=irand(6,8)){
+    const ii=Math.random()<.5?x-1:x+2;
+    if(sidewalk(ii,j)&&!near(ii,j)&&dist(ii,j)>4){
+      props.push({gx:ii,gy:j,type:'lamp',hue:irand(0,3),on:true});}
+  }
+  // hidrantes, contenedores y bancas dispersos en las banquetas
+  let cont=0,hyd=0,ben=0;
+  for(let t=0;t<900&&(cont<9||hyd<7||ben<8);t++){
+    const i=irand(3,MW-3),j=irand(3,MH-3);
+    if(!sidewalk(i,j)||near(i,j)||dist(i,j)<4)continue;
+    const r=Math.random();
+    if(r<.4&&cont<9){SOLID[idx(i,j)]=4;
+      props.push({gx:i,gy:j,type:'dumpster',hue:irand(0,3),looted:false,rt:0});cont++;}
+    else if(r<.72&&hyd<7){props.push({gx:i,gy:j,type:'hydrant'});hyd++;}
+    else if(ben<8){props.push({gx:i,gy:j,type:'bench'});ben++;}
+  }
 }
 function buildStatics(){
   statics=[];
@@ -371,6 +403,7 @@ function buildStatics(){
   for(const t of treesL)if(!t.dead)statics.push({kind:'tree',gx:t.gx,gy:t.gy,s:t.s,d:t.gx+t.gy});
   for(const f of furns)if(!f.gone)statics.push({kind:'furn',o:f,gx:f.gx,gy:f.gy,d:f.gx+f.gy});
   for(const c of crates)statics.push({kind:'crate',o:c,gx:c.gx,gy:c.gy,d:c.gx+c.gy});
+  for(const p of props)statics.push({kind:'prop',o:p,gx:p.gx,gy:p.gy,d:p.gx+p.gy});
 }
 let miniBase=null;
 function buildMini(){
@@ -492,6 +525,7 @@ function nearLoot(){
     if(d<bd&&!o.looted){bd=d;best={o,label};}};
   for(const f of furns)if(!f.gone)chk(f,FURN[f.type].label);
   for(const c of crates)chk(c,'caja');
+  for(const p of props)if(p.type==='dumpster')chk(p,'contenedor');
   for(const c of cars){const d=hyp(c.gx-player.gx,c.gy-player.gy);
     if(d<1.9&&d<bd&&!c.looted){bd=d;best={o:c,label:'auto'};}}
   return best;
@@ -612,6 +646,13 @@ function rollLoot(kind){
       if(tier>player.wTier){equipWeapon(tier);msg('🪓 Equipaste: '+MELEE[tier].n);}
       else{player.ammo+=4;msg('Arma repetida → +4 balas');}}
     else{player.scrap+=2;msg('🔩 Chatarra del casillero (+2)');}
+  }else if(kind==='dumpster'){                       // basura urbana: chatarra, tela, poco más
+    if(r<.34){player.scrap+=2;msg('🔩 Chatarra entre la basura (+2)');}
+    else if(r<.56){player.cloth++;msg('🧵 Trapos (+1 tela)');}
+    else if(r<.72){player.wood++;msg('🪵 Tablón roto (+1)');}
+    else if(r<.82)addInv('food','🍖 Lata abollada pero sellada');
+    else if(r<.9){player.gas++;msg('⛽ Bidón con restos de gasolina (+1)');}
+    else msg('Solo basura apestosa…');
   }else if(kind==='bomba'){
     if(r<.75){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
     else msg('La bomba está seca…');
@@ -770,7 +811,7 @@ function saveGame(){
   try{
     const s={v:SAVE_VER,
       floor:u8b64(FLOOR),solid:u8b64(SOLID),whue:u8b64(WHUE),
-      buildings,furns,crates,cars,treesL,fires,barrs,zombies,player,
+      buildings,furns,crates,cars,treesL,props,fires,barrs,zombies,player,
       inCar:inCar?cars.indexOf(inCar):-1,
       gameTime,kills,radioFound,won,prevNight,groanT,spawnT,winT,engineT,weather};
     localStorage.setItem(SAVE_KEY,JSON.stringify(s));
@@ -783,7 +824,7 @@ function loadGame(){
   try{
     FLOOR=b64u8(s.floor);SOLID=b64u8(s.solid);WHUE=b64u8(s.whue);
     buildings=s.buildings;furns=s.furns;crates=s.crates;cars=s.cars;
-    treesL=s.treesL;fires=s.fires||[];barrs=s.barrs||{};zombies=s.zombies||[];
+    treesL=s.treesL;props=s.props||[];fires=s.fires||[];barrs=s.barrs||{};zombies=s.zombies||[];
     player=s.player;
     if(!player.inv)player.inv={food:0,water:0,med:0,anti:0};
     if(!player.skills)player.skills={carp:0,mech:0,elec:0,med:0,str:0};
@@ -952,6 +993,7 @@ function update(dt){
   for(const f of furns)if(f.looted){f.rt-=dt;if(f.rt<=0)f.looted=false;}
   for(const c of crates)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
   for(const c of cars)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
+  for(const p of props)if(p.type==='dumpster'&&p.looted){p.rt-=dt;if(p.rt<=0)p.looted=false;}
 
   for(const p of parts){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.life-=dt;}
   parts=parts.filter(p=>p.life>0);
@@ -1593,6 +1635,7 @@ function draw(){
       drawTree(it,it.d>pD+.9&&hyp(it._sx-psx,it._sy-psy)<190);
     }else if(it.kind==='furn')drawFurn(it);
     else if(it.kind==='crate')drawCrate(it);
+    else if(it.kind==='prop')drawProp(it.o,it._sx,it._sy,night);
     else if(it.kind==='carD')drawCar(it.o);
     else if(it.kind==='fire')drawFire(it.o,it._sx,it._sy);
     else if(it.kind==='roof')drawRoof(it.o);
@@ -1699,6 +1742,15 @@ function draw(){
       g=lctx.createRadialGradient(fx,fy,8,fx,fy,rr);
       g.addColorStop(0,'rgba(0,0,0,.92)');g.addColorStop(1,'rgba(0,0,0,0)');
       lctx.fillStyle=g;lctx.beginPath();lctx.arc(fx,fy,rr,0,7);lctx.fill();
+    }
+    for(const p of props){                          // postes de luz alumbran la calle
+      if(p.type!=='lamp'||!p.on)continue;
+      const lx=g2sx(p.gx,p.gy)-cam.x+shx+13,ly=g2sy(p.gx,p.gy)-cam.y+shy-36;
+      if(lx<-140||lx>VW+140||ly<-140||ly>VH+140)continue;
+      const rr=70+Math.sin(gameTime*20+p.gx*5)*2.5;  // leve titileo
+      g=lctx.createRadialGradient(lx,ly,6,lx,ly,rr);
+      g.addColorStop(0,'rgba(0,0,0,.8)');g.addColorStop(1,'rgba(0,0,0,0)');
+      lctx.fillStyle=g;lctx.beginPath();lctx.arc(lx,ly,rr,0,7);lctx.fill();
     }
     if(player.gunFlash>0){
       g=lctx.createRadialGradient(px,py,10,px,py,200);
@@ -2099,6 +2151,56 @@ function drawFire(f,sx,sy){
     ctx.quadraticCurveTo(sx+w,sy-h*.4,sx,sy+1);
     ctx.quadraticCurveTo(sx-w,sy-h*.4,sx,sy-h);ctx.fill();
   }
+}
+// Mobiliario urbano
+function drawProp(p,sx,sy,night){
+  if(p.type==='lamp'){
+    groundShadow(p.gx,p.gy,10,5);
+    ctx.strokeStyle='#3b4048';ctx.lineWidth=3.4;      // mástil
+    ctx.beginPath();ctx.moveTo(sx,sy-2);ctx.lineTo(sx,sy-40);ctx.stroke();
+    ctx.strokeStyle='#4a505a';ctx.lineWidth=3;         // brazo curvo
+    ctx.beginPath();ctx.moveTo(sx,sy-40);ctx.quadraticCurveTo(sx+9,sy-44,sx+13,sy-40);ctx.stroke();
+    const hx=sx+13,hy=sy-39;
+    ctx.fillStyle='#2f343b';                            // farola
+    ctx.beginPath();ctx.moveTo(hx-5,hy);ctx.lineTo(hx+5,hy);ctx.lineTo(hx+3,hy+4);ctx.lineTo(hx-3,hy+4);ctx.closePath();ctx.fill();
+    if(p.on&&night){                                    // haz cálido de la lámpara
+      ctx.fillStyle='#ffe9a8';
+      ctx.beginPath();ctx.arc(hx,hy+3,3.1,0,7);ctx.fill();
+      const gl=ctx.createRadialGradient(hx,hy+3,1,hx,hy+3,26);
+      gl.addColorStop(0,'rgba(255,225,140,.5)');gl.addColorStop(1,'rgba(255,225,140,0)');
+      ctx.fillStyle=gl;ctx.beginPath();ctx.arc(hx,hy+3,26,0,7);ctx.fill();
+      ctx.fillStyle='rgba(255,228,150,.14)';            // cono de luz al piso
+      ctx.beginPath();ctx.moveTo(hx-3,hy+4);ctx.lineTo(hx+3,hy+4);
+      ctx.lineTo(hx+22,sy+3);ctx.lineTo(hx-22,sy+3);ctx.closePath();ctx.fill();
+    }else{ctx.fillStyle='#585e50';ctx.beginPath();ctx.arc(hx,hy+3,3,0,7);ctx.fill();}
+    return;
+  }
+  if(p.type==='hydrant'){
+    groundShadow(p.gx,p.gy,7,3.5);
+    const c=p.looted?['#6a2420','#551c18','#7a2e28']:['#b23b2e','#8f2c22','#c94a3a'];
+    ctx.fillStyle=c[0];ctx.beginPath();                 // cuerpo
+    ctx.moveTo(sx-4,sy-2);ctx.lineTo(sx-4,sy-13);ctx.lineTo(sx+4,sy-13);ctx.lineTo(sx+4,sy-2);ctx.closePath();ctx.fill();
+    ctx.fillStyle=c[2];ctx.beginPath();ctx.arc(sx,sy-13,4,Math.PI,0);ctx.fill();  // domo
+    ctx.fillStyle=c[1];ctx.fillRect(sx-7,sy-9,3,3);ctx.fillRect(sx+4,sy-9,3,3);   // brazos
+    ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(sx-4,sy-8);ctx.lineTo(sx+4,sy-8);ctx.stroke();
+    return;
+  }
+  if(p.type==='bench'){
+    groundShadow(p.gx,p.gy,15,6);
+    boxIso(p.gx+.18,p.gy+.35,p.gx+.82,p.gy+.65,7,4,['#5a4326','#6d5330','#7a5f38']); // asiento
+    ctx.strokeStyle='#4a3820';ctx.lineWidth=2.4;        // respaldo
+    const a=g2sx(p.gx+.18,p.gy+.35),b=g2sy(p.gx+.18,p.gy+.35),cc=g2sx(p.gx+.82,p.gy+.35),dd=g2sy(p.gx+.82,p.gy+.35);
+    ctx.beginPath();ctx.moveTo(a,b-11);ctx.lineTo(cc,dd-11);ctx.stroke();
+    return;
+  }
+  // dumpster
+  groundShadow(p.gx,p.gy,17,8);
+  const c=p.looted?['#2f4a3a','#243a2d','#3a5847']:['#3f6b4e','#31543d','#4d825f'];
+  cube(p.gx+.05,p.gy+.05,20,c,.86);
+  const tx=g2sx(p.gx+.5,p.gy+.1),ty=g2sy(p.gx+.5,p.gy+.1);
+  ctx.fillStyle='rgba(0,0,0,.22)';ctx.fillRect(tx-14,ty-22,28,3);   // tapa
+  if(!p.looted){ctx.fillStyle='#d9c26a';ctx.font='bold 9px Courier New';ctx.textAlign='center';
+    ctx.fillText('♻',tx,ty-9);ctx.textAlign='left';}
 }
 function drawBarr(b){
   const mh=b.mhp||130;
