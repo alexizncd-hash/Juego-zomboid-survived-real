@@ -168,19 +168,106 @@ function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
     }
   }
   for(const d of doors)FLOOR[idx(d.i,d.j+1)]=8;
-  const spots=[];
-  for(let i=bx+1;i<bx+bw-1;i++){if(i!==doorI&&!(wide&&i===doorI+1))spots.push([i,by+1]);}
-  for(let j=by+1;j<by+bh-1;j++){
-    if(!(bx+1===doorI&&j===by+bh-2))spots.push([bx+1,j]);
-    if(!(bx+bw-2===doorI||wide&&bx+bw-2===doorI+1)||j!==by+bh-2)spots.push([bx+bw-2,j]);
-  }
-  for(let k=0;k<furnTypes.length&&spots.length;k++){
-    const sp=spots.splice(irand(0,spots.length),1)[0];
-    if(SOLID[idx(sp[0],sp[1])])continue;
-    SOLID[idx(sp[0],sp[1])]=4;
-    furns.push({gx:sp[0],gy:sp[1],type:furnTypes[k],looted:false,rt:0,bt:btype});
-  }
+  // partición interior en cuartos con muros internos y una puerta cada uno
+  const doorTiles=[],rooms=[];
+  partitionRoom(bx+1,by+1,bx+bw-2,by+bh-2,0,rooms,doorTiles,hue);
+  // garantizar el paso justo dentro de la puerta principal
+  for(const d of doors){const ti=d.i,tj=d.j-1;
+    if(SOLID[idx(ti,tj)]===1){SOLID[idx(ti,tj)]=0;}
+    doorTiles.push([ti,tj]);}
+  furnishRooms(rooms,furnTypes,btype,doorTiles,doors);
+  ensureConnected(b);
   return b;
+}
+// Quita muebles que hayan aislado tiles, hasta que todo el interior sea
+// alcanzable desde la puerta principal (garantiza 100% de conectividad).
+function ensureConnected(b){
+  const inb=(i,j)=>i>=b.x+1&&i<=b.x+b.w-2&&j>=b.y+1&&j<=b.y+b.h-2;
+  const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
+  for(let guard=0;guard<600;guard++){
+    const seen=new Set(),st=[[b.doors[0].i,b.doors[0].j-1]];
+    while(st.length){const[i,j]=st.pop(),k=i+','+j;
+      if(seen.has(k)||!inb(i,j)||SOLID[idx(i,j)]!==0)continue;
+      seen.add(k);st.push([i+1,j],[i-1,j],[i,j+1],[i,j-1]);}
+    // reunir tiles libres no alcanzados
+    const iso=[];
+    for(let j=b.y+1;j<=b.y+b.h-2;j++)for(let i=b.x+1;i<=b.x+b.w-2;i++)
+      if(SOLID[idx(i,j)]===0&&!seen.has(i+','+j))iso.push([i,j]);
+    if(!iso.length)break;
+    let acted=false;
+    // 1º: quitar un mueble que aísle (preferimos conservar los muros)
+    for(const[i,j]of iso){
+      for(const[di,dj]of DIRS){const fi=i+di,fj=j+dj;
+        if(inb(fi,fj)&&SOLID[idx(fi,fj)]===4){
+          SOLID[idx(fi,fj)]=0;
+          for(let f=furns.length-1;f>=0;f--)if(furns[f].gx===fi&&furns[f].gy===fj){furns.splice(f,1);break;}
+          acted=true;break;}}
+      if(acted)break;
+    }
+    // 2º: si no había mueble, abrir hueco en el muro interno hacia la zona alcanzable
+    if(!acted){
+      for(const[i,j]of iso){
+        for(const[di,dj]of DIRS){const wi=i+di,wj=j+dj,bi=i+2*di,bj=j+2*dj;
+          if(inb(wi,wj)&&SOLID[idx(wi,wj)]===1&&inb(bi,bj)&&SOLID[idx(bi,bj)]===0&&seen.has(bi+','+bj)){
+            SOLID[idx(wi,wj)]=0;acted=true;break;}}
+        if(acted)break;
+      }
+    }
+    // 3º: último recurso, unir bolsas aisladas entre sí (cascada hasta conectar)
+    if(!acted){
+      for(const[i,j]of iso){
+        for(const[di,dj]of DIRS){const wi=i+di,wj=j+dj,bi=i+2*di,bj=j+2*dj;
+          if(inb(wi,wj)&&(SOLID[idx(wi,wj)]===1||SOLID[idx(wi,wj)]===4)&&inb(bi,bj)&&SOLID[idx(bi,bj)]===0){
+            if(SOLID[idx(wi,wj)]===4)for(let f=furns.length-1;f>=0;f--)if(furns[f].gx===wi&&furns[f].gy===wj){furns.splice(f,1);break;}
+            SOLID[idx(wi,wj)]=0;acted=true;break;}}
+        if(acted)break;
+      }
+    }
+    if(!acted)break;
+  }
+}
+// Divide un rectángulo interior en cuartos con muros internos; cada muro
+// recibe una puerta, de modo que el árbol de cuartos queda 100% conectado.
+function partitionRoom(x0,y0,x1,y1,depth,rooms,doorTiles,hue){
+  const w=x1-x0+1,h=y1-y0+1,MIN=3,MAXD=4;
+  const canV=w>=MIN*2+1,canH=h>=MIN*2+1;
+  if(depth>=MAXD||(!canV&&!canH)||(depth>=1&&Math.random()<.28)){
+    rooms.push({x0,y0,x1,y1});return;}
+  let vert;
+  if(canV&&canH)vert=(w>=h)?Math.random()<.7:Math.random()<.3;
+  else vert=canV;
+  if(vert){
+    const wx=irand(x0+MIN,x1-MIN+1);
+    for(let j=y0;j<=y1;j++){SOLID[idx(wx,j)]=1;WHUE[idx(wx,j)]=hue;FLOOR[idx(wx,j)]=6;}
+    const dj=irand(y0,y1+1);SOLID[idx(wx,dj)]=0;doorTiles.push([wx,dj]);
+    partitionRoom(x0,y0,wx-1,y1,depth+1,rooms,doorTiles,hue);
+    partitionRoom(wx+1,y0,x1,y1,depth+1,rooms,doorTiles,hue);
+  }else{
+    const wy=irand(y0+MIN,y1-MIN+1);
+    for(let i=x0;i<=x1;i++){SOLID[idx(i,wy)]=1;WHUE[idx(i,wy)]=hue;FLOOR[idx(i,wy)]=6;}
+    const di=irand(x0,x1+1);SOLID[idx(di,wy)]=0;doorTiles.push([di,wy]);
+    partitionRoom(x0,y0,x1,wy-1,depth+1,rooms,doorTiles,hue);
+    partitionRoom(x0,wy+1,x1,y1,depth+1,rooms,doorTiles,hue);
+  }
+}
+// Amuebla cada cuarto pegando muebles a sus muros, sin bloquear puertas.
+function furnishRooms(rooms,furnTypes,btype,doorTiles,doors){
+  const blocked=new Set(),bk=(i,j)=>i+','+j;
+  for(const[i,j]of doorTiles){blocked.add(bk(i,j));
+    blocked.add(bk(i+1,j));blocked.add(bk(i-1,j));blocked.add(bk(i,j+1));blocked.add(bk(i,j-1));}
+  for(const d of doors){blocked.add(bk(d.i,d.j-1));blocked.add(bk(d.i,d.j-2));}
+  const spots=[];
+  for(const r of rooms)for(let j=r.y0;j<=r.y1;j++)for(let i=r.x0;i<=r.x1;i++){
+    if(SOLID[idx(i,j)]!==0||blocked.has(bk(i,j)))continue;
+    if(SOLID[idx(i-1,j)]===1||SOLID[idx(i+1,j)]===1||SOLID[idx(i,j-1)]===1||SOLID[idx(i,j+1)]===1)
+      spots.push([i,j]);
+  }
+  for(let i=spots.length-1;i>0;i--){const j=irand(0,i+1);const t=spots[i];spots[i]=spots[j];spots[j]=t;}
+  const n=Math.min(spots.length,Math.max(furnTypes.length,Math.floor(spots.length*.42)));
+  for(let k=0;k<n;k++){const[i,j]=spots[k];if(SOLID[idx(i,j)])continue;
+    SOLID[idx(i,j)]=4;
+    furns.push({gx:i,gy:j,type:furnTypes[irand(0,furnTypes.length)],looted:false,rt:0,bt:btype});
+  }
 }
 function genWorld(){
   FLOOR=new Uint8Array(MW*MH);SOLID=new Uint8Array(MW*MH);WHUE=new Uint8Array(MW*MH);
