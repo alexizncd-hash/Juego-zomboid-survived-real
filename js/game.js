@@ -274,52 +274,61 @@ function genWorld(){
   buildings=[];furns=[];crates=[];cars=[];treesL=[];statics=[];
   for(let j=0;j<MH;j++)for(let i=0;i<MW;i++)FLOOR[idx(i,j)]=irand(0,4);
   const ry=Math.floor(MH/2),rx=Math.floor(MW/2);
-  for(let i=0;i<MW;i++){FLOOR[idx(i,ry)]=5;FLOOR[idx(i,ry+1)]=4;
-    FLOOR[idx(i,ry-1)]=7;FLOOR[idx(i,ry+2)]=7;}
-  for(let j=0;j<MH;j++){if(FLOOR[idx(rx,j)]<4)FLOOR[idx(rx,j)]=5;
-    if(FLOOR[idx(rx+1,j)]<4)FLOOR[idx(rx+1,j)]=4;
-    if(FLOOR[idx(rx-1,j)]<4)FLOOR[idx(rx-1,j)]=7;
-    if(FLOOR[idx(rx+2,j)]<4)FLOOR[idx(rx+2,j)]=7;}
-  // edificios especiales repartidos por el pueblo (barrios alrededor del cruce)
-  for(let k=0;k<SPECIALS.length;k++){
-    const sp=SPECIALS[k];let placed=false;
-    for(let t=0;t<300&&!placed;t++){
-      // primeros intentos cerca del centro urbano, luego más lejos
-      const spread=8+Math.min(30,t*.2);
-      const bx=clamp(Math.round(rx+rand(-spread,spread)),4,MW-sp.w-4);
-      const by=clamp(Math.round(ry+rand(-spread,spread)),4,MH-sp.h-4);
-      if(hyp(bx+sp.w/2-EP.x,by+sp.h/2-EP.y)<8)continue;
-      let ok=true;
-      for(let j=by-2;j<by+sp.h+2&&ok;j++)for(let i=bx-2;i<bx+sp.w+2;i++){
-        if(SOLID[idx(i,j)]||FLOOR[idx(i,j)]>=4){ok=false;break;}}
-      if(!ok)continue;
-      carveBuilding(bx,by,sp.w,sp.h,sp.hue,sp.furn,sp.type,sp.name);
-      if(sp.pumps){
-        for(const off of[1,4]){
-          const pi=bx+off,pj=by+sp.h+1;
-          if(!SOLID[idx(pi,pj)]&&FLOOR[idx(pi,pj)]<4){
-            SOLID[idx(pi,pj)]=4;
-            furns.push({gx:pi,gy:pj,type:'bomba',looted:false,rt:0,bt:sp.type});}
-        }
-      }
-      placed=true;
-    }
-    if(!placed)console.warn('no cupo',sp.type);
+  // ── retícula de calles (avenidas cada ~20 tiles) que forma manzanas ──
+  const roadRows=[],roadCols=[];
+  for(let y=irand(9,13);y<MH-8;y+=irand(17,22))roadRows.push(y);
+  for(let x=irand(9,13);x<MW-8;x+=irand(17,22))roadCols.push(x);
+  if(roadRows.length===0||!roadRows.some(y=>Math.abs(y-ry)<10))roadRows.push(ry);
+  const drawH=y=>{for(let i=0;i<MW;i++){FLOOR[idx(i,y)]=5;if(y+1<MH)FLOOR[idx(i,y+1)]=4;
+    if(y-1>=0&&FLOOR[idx(i,y-1)]<4)FLOOR[idx(i,y-1)]=7;
+    if(y+2<MH&&FLOOR[idx(i,y+2)]<4)FLOOR[idx(i,y+2)]=7;}};
+  const drawV=x=>{for(let j=0;j<MH;j++){if(FLOOR[idx(x,j)]<4)FLOOR[idx(x,j)]=5;
+    if(x+1<MW&&FLOOR[idx(x+1,j)]<4)FLOOR[idx(x+1,j)]=4;
+    if(x-1>=0&&FLOOR[idx(x-1,j)]<4)FLOOR[idx(x-1,j)]=7;
+    if(x+2<MW&&FLOOR[idx(x+2,j)]<4)FLOOR[idx(x+2,j)]=7;}};
+  for(const y of roadRows)drawH(y);
+  for(const x of roadCols)drawV(x);
+  // coloca un edificio en una manzana, con su fachada/puerta hacia la banqueta
+  function fits(bx,by,bw,bh){
+    if(bx<3||by<3||bx+bw>MW-3||by+bh>MH-3)return false;
+    for(let j=by;j<by+bh;j++)for(let i=bx;i<bx+bw;i++)
+      if(FLOOR[idx(i,j)]>=4||SOLID[idx(i,j)])return false;   // huella sobre pasto libre
+    for(let j=by-1;j<=by+bh;j++)for(let i=bx-1;i<=bx+bw;i++){
+      if(i<0||j<0||i>=MW||j>=MH)continue;
+      const s=SOLID[idx(i,j)];if(s===1||s===2)return false;}  // no pegado a otro edificio
+    return true;
   }
-  // casas normales (con cama garantizada)
-  for(let n=0;n<7;n++)for(let t=0;t<90;t++){
+  function placeUrban(bw,bh,furnTypes,btype,bname,hue){
+    for(let t=0;t<300;t++){
+      const rr=roadRows[irand(0,roadRows.length)];
+      const north=Math.random()<.62;
+      const by=north?(rr-1-bh):(rr+3);          // deja la banqueta libre enfrente
+      const bx=irand(4,MW-bw-4);
+      if(hyp(bx+bw/2-EP.x,by+bh/2-EP.y)<8)continue;
+      if(!fits(bx,by,bw,bh))continue;
+      return carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname);
+    }
+    for(let t=0;t<200;t++){                       // reserva: dispersa en pasto
+      const bx=irand(4,MW-bw-4),by=irand(4,MH-bh-4);
+      if(hyp(bx+bw/2-EP.x,by+bh/2-EP.y)<8)continue;
+      if(fits(bx,by,bw,bh))return carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname);
+    }
+    return null;
+  }
+  for(const sp of SPECIALS){
+    const b=placeUrban(sp.w,sp.h,sp.furn,sp.type,sp.name,sp.hue);
+    if(b&&sp.pumps)for(const off of[1,4]){const pi=b.x+off,pj=b.y+sp.h+1;
+      if(pj<MH&&!SOLID[idx(pi,pj)]&&FLOOR[idx(pi,pj)]<4){SOLID[idx(pi,pj)]=4;
+        furns.push({gx:pi,gy:pj,type:'bomba',looted:false,rt:0,bt:sp.type});}}
+    if(!b)console.warn('no cupo',sp.type);
+  }
+  // casas (con cama garantizada) repartidas por las manzanas
+  for(let n=0;n<8;n++){
     const bw=irand(6,10),bh=irand(5,8);
-    const bx=irand(4,MW-bw-4),by=irand(4,MH-bh-4);
-    if(hyp(bx+bw/2-EP.x,by+bh/2-EP.y)<8)continue;
-    let ok=true;
-    for(let j=by-2;j<by+bh+2&&ok;j++)for(let i=bx-2;i<bx+bw+2;i++){
-      if(SOLID[idx(i,j)]||FLOOR[idx(i,j)]>=4){ok=false;break;}}
-    if(!ok)continue;
     const pool=['cama','nevera','alacena','alacena','ropero','mesa'];
     const ft=['cama'];const nf=irand(3,6);
     for(let k=1;k<nf;k++)ft.push(pool[irand(0,pool.length)]);
-    carveBuilding(bx,by,bw,bh,irand(0,3),ft,null,null);
-    break;
+    placeUrban(bw,bh,ft,null,null,irand(0,3));
   }
   // árboles (con vida, lejos del punto de extracción)
   for(let n=0;n<90;n++)for(let t=0;t<40;t++){
@@ -333,9 +342,10 @@ function genWorld(){
   // autos DINÁMICOS sobre la carretera (sin SOLID: colisión por círculo)
   // flota variada sobre la carretera
   const vpool=['sedan','sedan','sedan','pickup','van','van','truck','bus'];
-  for(let n=0;n<7;n++)for(let t=0;t<40;t++){
+  for(let n=0;n<10;n++)for(let t=0;t<40;t++){
     const type=vpool[irand(0,vpool.length)],T=VTYPE[type];
-    const i=irand(5,MW-6),j=ry+irand(0,2);
+    const rr=roadRows[irand(0,roadRows.length)];
+    const i=irand(5,MW-6),j=rr+irand(0,2);
     let clash=false;
     for(const c of cars)if(hyp(c.gx-(i+1),c.gy-(j+.5))<3.2){clash=true;break;}
     if(SOLID[idx(i,j)]||SOLID[idx(i+1,j)]||clash)continue;
