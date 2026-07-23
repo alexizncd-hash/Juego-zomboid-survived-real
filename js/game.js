@@ -1160,44 +1160,33 @@ function drawRoof(b){
   ctx.beginPath();ctx.moveTo(rA[0],rA[1]);ctx.lineTo(rB[0],rB[1]);ctx.stroke();
   ctx.globalAlpha=1;
 }
+// Muro delgado: en vez de un cubo que llena el tile, un panel angosto
+// orientado según sus vecinos, para que se lea como pared de concreto.
+const WTHK=0.32;
 function drawWall(st,night){
-  const p=cube(st.gx,st.gy,WALLH,HUES[st.hue]);
-  // revestimiento horizontal en ambas caras
-  ctx.strokeStyle='rgba(0,0,0,.13)';ctx.lineWidth=1;
-  for(let s=1;s<5;s++){const yy=-WALLH*s/5;
-    ctx.beginPath();ctx.moveTo(p.dx,p.dy+yy);ctx.lineTo(p.cx,p.cy+yy);
-    ctx.moveTo(p.cx,p.cy+yy);ctx.lineTo(p.bx,p.by+yy);ctx.stroke();}
-  // zócalo oscuro abajo
-  ctx.fillStyle='rgba(0,0,0,.17)';
-  ctx.beginPath();ctx.moveTo(p.dx,p.dy);ctx.lineTo(p.cx,p.cy);ctx.lineTo(p.cx,p.cy-6);ctx.lineTo(p.dx,p.dy-6);ctx.closePath();ctx.fill();
-  ctx.beginPath();ctx.moveTo(p.cx,p.cy);ctx.lineTo(p.bx,p.by);ctx.lineTo(p.bx,p.by-6);ctx.lineTo(p.cx,p.cy-6);ctx.closePath();ctx.fill();
-  // alero claro arriba
-  ctx.fillStyle='rgba(255,252,240,.09)';
-  ctx.beginPath();ctx.moveTo(p.dx,p.dy-WALLH);ctx.lineTo(p.cx,p.cy-WALLH);ctx.lineTo(p.cx,p.cy-WALLH+4);ctx.lineTo(p.dx,p.dy-WALLH+4);ctx.closePath();ctx.fill();
-  ctx.beginPath();ctx.moveTo(p.cx,p.cy-WALLH);ctx.lineTo(p.bx,p.by-WALLH);ctx.lineTo(p.bx,p.by-WALLH+4);ctx.lineTo(p.cx,p.cy-WALLH+4);ctx.closePath();ctx.fill();
-  // regueros de suciedad/humedad (estables por muro)
-  ctx.fillStyle='rgba(18,14,9,.13)';
-  for(const[e0x,e0y,e1x,e1y,fr]of[[p.dx,p.dy,p.cx,p.cy,.34],[p.dx,p.dy,p.cx,p.cy,.7],
-      [p.cx,p.cy,p.bx,p.by,.4],[p.cx,p.cy,p.bx,p.by,.72]]){
-    const tx=lerp(e0x,e1x,fr),ty=lerp(e0y,e1y,fr);
-    ctx.beginPath();ctx.moveTo(tx-1.4,ty-WALLH+3);ctx.lineTo(tx+1.4,ty-WALLH+3);
-    ctx.lineTo(tx+1.4,ty-2);ctx.lineTo(tx-1.4,ty-2);ctx.closePath();ctx.fill();
+  const i=st.gx,j=st.gy,c=HUES[st.hue],cols=[c[0],c[1],c[2]];
+  const isW=(a,b)=>{if(a<0||b<0||a>=MW||b>=MH)return false;const s=SOLID[idx(a,b)];return s===1||s===2||s===5;};
+  const hor=isW(i-1,j)||isW(i+1,j),ver=isW(i,j-1)||isW(i,j+1);
+  const segs=[];
+  if(hor)segs.push([i,j+.5-WTHK/2,i+1,j+.5+WTHK/2]);        // panel E-O
+  if(ver)segs.push([i+.5-WTHK/2,j,i+.5+WTHK/2,j+1]);        // panel N-S
+  if(!segs.length)segs.push([i+.26,j+.26,i+.74,j+.74]);     // poste suelto
+  let top=null;
+  for(const[x0,y0,x1,y1]of segs){
+    top=boxIso(x0,y0,x1,y1,0,WALLH,cols);
+    // remate claro arriba + zócalo oscuro para dar volumen a la pared
+    ctx.fillStyle='rgba(255,252,240,.08)';
+    ctx.beginPath();ctx.moveTo(top[0][0],top[0][1]);ctx.lineTo(top[1][0],top[1][1]);
+    ctx.lineTo(top[2][0],top[2][1]);ctx.lineTo(top[3][0],top[3][1]);ctx.closePath();ctx.fill();
   }
-  if(st.win){
-    const glow=night?'rgba(232,197,107,.92)':'rgba(140,170,190,.85)';
-    ctx.fillStyle=glow;
-    const mx1=(p.dx+p.cx)/2,my1=(p.dy+p.cy)/2;
-    ctx.fillRect(mx1-7,my1-WALLH*.72,11,13);
-    const mx2=(p.cx+p.bx)/2,my2=(p.cy+p.by)/2;
-    ctx.fillRect(mx2-4,my2-WALLH*.72,11,13);
-    ctx.strokeStyle='rgba(0,0,0,.4)';
-    ctx.strokeRect(mx1-7,my1-WALLH*.72,11,13);ctx.strokeRect(mx2-4,my2-WALLH*.72,11,13);
-    if(barrs[st.gx+','+st.gy]){
-      ctx.strokeStyle='#5c4426';ctx.lineWidth=3.4;
-      for(const[mx,my]of[[mx1,my1],[mx2,my2]]){
-        ctx.beginPath();ctx.moveTo(mx-9,my-WALLH*.68);ctx.lineTo(mx+8,my-WALLH*.6);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(mx-9,my-WALLH*.5);ctx.lineTo(mx+8,my-WALLH*.42);ctx.stroke();}
-    }
+  if(st.win){                                               // ventana iluminada
+    const sx=g2sx(i+.5,j+.5),sy=g2sy(i+.5,j+.5);
+    ctx.fillStyle=night?'rgba(232,197,107,.9)':'rgba(150,180,205,.85)';
+    ctx.fillRect(sx-5,sy-WALLH*.62,10,13);
+    ctx.strokeStyle='rgba(0,0,0,.4)';ctx.strokeRect(sx-5,sy-WALLH*.62,10,13);
+    if(barrs[i+','+j]){ctx.strokeStyle='#5c4426';ctx.lineWidth=2.6;
+      ctx.beginPath();ctx.moveTo(sx-6,sy-WALLH*.55);ctx.lineTo(sx+6,sy-WALLH*.5);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sx-6,sy-WALLH*.4);ctx.lineTo(sx+6,sy-WALLH*.35);ctx.stroke();}
   }
 }
 function drawFurn(st){
