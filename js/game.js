@@ -625,193 +625,113 @@ function giveGunOrAmmo(){
 // Libros temáticos según el mueble saqueado.
 const BOOK_SRC={ropero:['str','carp'],estante:['carp','elec'],mesa:['elec','mech'],
   casillero:['str','mech'],alacena:['carp','med'],botiquin:['med'],camilla:['med'],auto:['mech']};
-function maybeBook(kind){
-  const opts=BOOK_SRC[kind];
-  if(opts&&Math.random()<.12){giveBook(opts[irand(0,opts.length)]);return true;}
-  return false;
-}
 function pickTool(){const ks=Object.keys(TOOLS);return ks[irand(0,ks.length)];}
 function giveTool(t){
   if(player.tools[t]){player.scrap+=1;msg(TOOLS[t].ic+' '+TOOLS[t].n+' repetido → +1 🔩');return;}
   player.tools[t]=true;msg(TOOLS[t].ic+' ¡Conseguiste un '+TOOLS[t].n+'!');
   sfx(420,.2,'triangle',.06);sfx(560,.15,'triangle',.05);
 }
-// Botín sesgado por el tipo de edificio: cada estructura urbana tiene lo suyo.
-function maybeThemed(bt,kind){
-  if(!bt)return false;
-  const r=Math.random();
-  if(bt==='ferreteria'){                          // herramientas, madera, chatarra
-    if(r<.42)giveTool(pickTool());
-    else if(r<.62){player.scrap+=2;msg('🔩 Chatarra (+2)');}
-    else if(r<.8){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else if(r<.9)giveGunOrAmmo();
-    else return false;
-    return true;
-  }
-  if(bt==='farmacia'){                            // medicinas
-    if(r<.4)addInv('anti','💊 Antibióticos');
-    else if(r<.75)addInv('med','🩹 Botiquín');
-    else if(r<.9){player.alcohol++;msg('🧪 Alcohol (+1)');}
-    else return false;
-    return true;
-  }
-  if(bt==='barberia'){                            // tela, alcohol, tijeras
-    if(r<.35){player.cloth+=2;msg('🧵 Tela (+2)');}
-    else if(r<.6){player.alcohol++;msg('🧪 Alcohol/loción (+1)');}
-    else if(r<.75&&player.wTier<1){equipWeapon(1);msg('✂️ Tijeras afiladas → arma');}
-    else return false;
-    return true;
-  }
-  if(bt==='carcel'){                              // armas, herramientas, algo de comida
-    if(r<.3)giveTool(pickTool());
-    else if(r<.5){player.ammo+=6;msg('🔸 Balas (+6)');}
-    else if(r<.65)giveGunOrAmmo();
-    else if(r<.8){player.scrap+=2;msg('🔩 Chatarra (+2)');}
-    else return false;
-    return true;
-  }
-  if(bt==='taller_mec'){                          // gasolina, llave, refacciones
-    if(r<.34){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
-    else if(r<.55)giveTool('wrench');
-    else if(r<.72){player.scrap+=2;msg('🔩 Refacciones (+2)');}
-    else if(r<.85){player.wood++;msg('🪵 Tablón (+1)');}
-    else return false;
-    return true;
-  }
-  if(bt==='bar'||bt==='restaurante'){             // alcohol, comida, algún bate
-    if(r<.34){player.alcohol++;msg('🧪 Botella de alcohol (+1)');}
-    else if(r<.6)addInv('food','🍖 Comida de la cocina');
-    else if(r<.74)addInv('water','💧 Bebida');
-    else if(r<.84&&player.wTier<2){equipWeapon(2);msg('🏏 Un bate tras la barra → arma');}
-    else return false;
-    return true;
-  }
-  if(bt==='bodega'){                              // comida y agua en volumen
-    if(r<.45)addInv('food','🍖 Provisiones en caja');
-    else if(r<.78)addInv('water','💧 Agua embotellada');
-    else if(r<.9){player.wood+=2;msg('🪵 Tarima de madera (+2)');}
-    else return false;
-    return true;
-  }
-  if(bt==='escuela'){                             // libros (XP), vendas, algo de comida
-    if(Math.random()<.3){const sk=['carp','mech','elec','med','str'];giveBook(sk[irand(0,sk.length)]);return true;}
-    if(r<.3)addInv('med','🩹 Botiquín de enfermería');
-    else if(r<.5)addInv('food','🍖 Comida de cafetería');
-    else if(r<.7)addInv('water','💧 Agua');
-    else if(r<.82){player.scrap++;msg('🔩 Chatarra del taller (+1)');}
-    else return false;
-    return true;
-  }
-  if(bt==='oficina'){                             // chatarra, algo de comida, rara arma
-    if(maybeRadio(.14))return true;
-    if(r<.32){player.scrap+=2;msg('🔩 Electrónicos (+2 chatarra)');}
-    else if(r<.5)addInv('food','🍖 Almuerzo olvidado');
-    else if(r<.64)addInv('water','💧 Agua');
-    else if(r<.72)giveGunOrAmmo();
-    else return false;
-    return true;
-  }
-  if(bt==='iglesia'){                             // velas/tela, algo de comida
-    if(r<.4){player.cloth++;msg('🧵 Manteles (+1 tela)');}
-    else if(r<.6)addInv('food','🍖 Despensa de caridad');
-    else if(r<.72)addInv('med','🩹 Vendas');
-    else return false;
-    return true;
-  }
-  return false;                                   // otros edificios (casa): botín normal
+/* ── Botín por tabla de pesos: MUEBLE (base) × EDIFICIO (extra) ──
+   Cada mueble tiene su tabla base; el edificio donde está suma sus propios
+   pesos encima. Así una alacena en una bodega escupe comida, y la misma
+   alacena en un taller escupe refacciones. Los objetos RAROS llevan peso
+   muy bajo y solo existen en la tabla del edificio donde tienen sentido. */
+function giveWeapon(tier,label){
+  if(tier>player.wTier){equipWeapon(tier);msg('🪓 '+(label||'Equipaste')+': '+MELEE[tier].n);
+    sfx(300,.2,'triangle');}
+  else{player.ammo+=3;msg('Arma repetida → +3 balas');}
+  return true;
 }
-function rollLoot(kind){
-  if(maybeBook(kind))return;
-  const r=Math.random();
-  if(kind==='nevera'){
-    if(r<.3)addInv('food','🍖 Comida enlatada');
-    else if(r<.62){player.rawFood++;msg('🥩 Carne cruda (+1) — cocínala en una fogata');}
-    else if(r<.85)addInv('water','💧 Agua');
-    else msg('La nevera apesta… vacía');
-  }else if(kind==='alacena'){
-    if(maybeRadio(.14))return;
-    if(r<.28)addInv('food','🍖 Enlatados');else if(r<.46)addInv('water','💧 Agua');
-    else if(r<.58){player.ammo+=6;msg('🔸 Balas 9mm (+6)');}
-    else if(r<.66)addInv('anti','💊 Antibióticos');
-    else if(r<.76)addInv('med','🩹 Vendas');
-    else if(r<.9){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else{player.alcohol++;msg('🧪 Botella de alcohol (+1)');}
-  }else if(kind==='ropero'){
-    if(r<.22)addInv('med','🩹 Botiquín');
-    else if(r<.42){const rr=Math.random(),tier=rr<.5?1:(rr<.82?2:3);
-      if(tier>player.wTier){equipWeapon(tier);msg('🪓 Equipaste: '+MELEE[tier].n);sfx(300,.2,'triangle');}
-      else{player.ammo+=3;msg('Arma repetida → +3 balas');}}
-    else if(r<.52)giveGunOrAmmo();
-    else if(r<.6)addInv('anti','💊 Antibióticos');
-    else{player.cloth+=2;msg('🧵 Tela de ropa vieja (+2)');}
-  }else if(kind==='cama'){
-    if(r<.3)addInv('med','🩹 Vendas bajo el colchón');
-    else if(r<.65){player.cloth++;msg('🧵 Sábanas hechas jirones (+1 tela)');}
-    else msg('Nada bajo la cama… por suerte');
-  }else if(kind==='mesa'){
-    if(maybeRadio(.22))return;
-    if(r<.35)addInv('food','🍖 Restos de comida');
-    else if(r<.55){player.ammo+=3;msg('🔸 Balas sueltas (+3)');}
-    else if(r<.78){player.scrap++;msg('🔩 Chatarra (+1)');}
-    else msg('Nada en la mesa…');
-  }else if(kind==='estante'){
-    if(r<.42)addInv('food','🍖 Provisiones');
-    else if(r<.68)addInv('water','💧 Agua embotellada');
-    else if(r<.85){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else{player.scrap++;msg('🔩 Chatarra del estante (+1)');}
-  }else if(kind==='camilla'){
-    if(r<.4)addInv('med','🩹 Botiquín');
-    else if(r<.6)addInv('anti','💊 Antibióticos');
-    else if(r<.8){player.alcohol++;msg('🧪 Frasco de alcohol (+1)');}
-    else{player.cloth++;msg('🧵 Sábanas (+1 tela)');}
-  }else if(kind==='botiquin'){
-    if(r<.4)addInv('anti','💊 Antibióticos');
-    else if(r<.7)addInv('med','🩹 Botiquín');
-    else{player.alcohol++;msg('🧪 Alcohol medicinal (+1)');}
-  }else if(kind==='casillero'){
-    if(maybeRadio(.2))return;
-    if(Math.random()<.12){giveTool(pickTool());return;}
-    if(r<.3)giveGunOrAmmo();
-    else if(r<.55){player.ammo+=8;msg('🔸 Caja de balas (+8)');}
-    else if(r<.75){const rr=Math.random(),tier=rr<.4?2:3;
-      if(tier>player.wTier){equipWeapon(tier);msg('🪓 Equipaste: '+MELEE[tier].n);}
-      else{player.ammo+=4;msg('Arma repetida → +4 balas');}}
-    else{player.scrap+=2;msg('🔩 Chatarra del casillero (+2)');}
-  }else if(kind==='dumpster'){                       // basura urbana: chatarra, tela, poco más
-    if(r<.34){player.scrap+=2;msg('🔩 Chatarra entre la basura (+2)');}
-    else if(r<.56){player.cloth++;msg('🧵 Trapos (+1 tela)');}
-    else if(r<.72){player.wood++;msg('🪵 Tablón roto (+1)');}
-    else if(r<.82)addInv('food','🍖 Lata abollada pero sellada');
-    else if(r<.9){player.gas++;msg('⛽ Bidón con restos de gasolina (+1)');}
-    else msg('Solo basura apestosa…');
-  }else if(kind==='bomba'){
-    if(r<.75){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
-    else msg('La bomba está seca…');
-  }else if(kind==='auto'){
-    if(Math.random()<.1){giveTool('wrench');return;}   // llave en la cajuela
-    if(r<.3){player.ammo+=6;msg('🔸 Balas en la guantera (+6)');}
-    else if(r<.5)addInv('water','💧 Agua');
-    else if(r<.65)addInv('food','🍖 Comida');
-    else if(r<.75)addInv('med','🩹 Botiquín');
-    else if(r<.85)giveGunOrAmmo();
-    else{player.scrap+=2;msg('🔩 Piezas sueltas del motor (+2)');}
-  }else{ // caja
-    if(r<.18){player.wood+=2;msg('🪵 Tablones (+2)');}
-    else if(r<.35)addInv('food','🍖 Comida');else if(r<.5)addInv('water','💧 Agua');
-    else if(r<.62)addInv('med','🩹 Botiquín');
-    else if(r<.76){player.ammo+=6;msg('🔸 Balas 9mm (+6)');}
-    else if(r<.88){const rr=Math.random(),tier=rr<.5?1:(rr<.82?2:3);
-      if(tier>player.wTier){equipWeapon(tier);msg('🪓 Equipaste: '+MELEE[tier].n);}
-      else{player.ammo+=3;msg('Arma repetida → +3 balas');}}
-    else{player.scrap+=2;msg('🔩 Chatarra (+2)');}
-  }
-}
-function maybeRadio(p){
-  if(radioFound)return false;
-  if(Math.random()<p){radioFound=true;
+// id → qué entrega. Devuelve false si no aplica ahora (se vuelve a tirar).
+const LOOT_DEF={
+  food:    {fn:()=>addInv('food','🍖 Comida enlatada')},
+  agua:    {fn:()=>addInv('water','💧 Agua embotellada')},
+  cruda:   {fn:()=>{player.rawFood++;msg('🥩 Carne cruda (+1) — cocínala en una fogata');}},
+  vendas:  {fn:()=>addInv('med','🩹 Vendas')},
+  anti:    {fn:()=>addInv('anti','💊 Antibióticos')},
+  madera:  {fn:()=>{player.wood+=2;msg('🪵 Tablones (+2)');}},
+  chatarra:{fn:()=>{player.scrap+=2;msg('🔩 Chatarra (+2)');}},
+  tela:    {fn:()=>{player.cloth+=2;msg('🧵 Tela (+2)');}},
+  alcohol: {fn:()=>{player.alcohol++;msg('🧪 Botella de alcohol (+1)');}},
+  gas:     {fn:()=>{player.gas++;msg('⛽ Bidón de gasolina (+1)');}},
+  balas:   {fn:()=>{player.ammo+=6;msg('🔸 Balas 9mm (+6)');}},
+  nada:    {fn:()=>msg('Nada útil aquí…')},
+  // poco comunes
+  herram:  {fn:()=>giveTool(pickTool())},
+  llave:   {fn:()=>giveTool('wrench')},
+  pistola: {fn:()=>giveGunOrAmmo()},
+  cajabalas:{fn:()=>{player.ammo+=10;msg('🔸 Caja de balas (+10)');}},
+  arma1:   {fn:()=>giveWeapon(1)},
+  arma2:   {fn:()=>giveWeapon(2)},
+  libro:   {fn:kind=>{const o=BOOK_SRC[kind]||['carp','mech','elec','med','str'];
+    giveBook(o[irand(0,o.length)]);}},
+  // RAROS: solo en su sitio, peso mínimo
+  arma3:   {rare:1,fn:()=>giveWeapon(3,'¡Un hallazgo!')},
+  chaleco: {rare:1,fn:()=>{if(player.armor>50)return false;
+    player.armor=100;msg('🦺 ¡Chaleco antibalas! (100)');return true;}},
+  morfina: {rare:1,fn:()=>{player.hp=clamp(player.hp+45,0,100);
+    addInv('med','💉 ¡Morfina! (+45 vida)');return true;}},
+  radio:   {rare:1,fn:()=>{if(radioFound)return false;radioFound=true;
     msg('📻 ¡UNA RADIO! "…extracción DÍA 7, claro al NORESTE…"');
-    sfx(880,.3,'sine',.06);sfx(440,.4,'sine',.04);return true;}
-  return false;
+    sfx(880,.3,'sine',.06);sfx(440,.4,'sine',.04);return true;}}
+};
+// Tabla BASE por mueble (lo que ese mueble contiene en cualquier lado).
+const FURN_LOOT={
+  nevera:   {food:30,cruda:26,agua:20,alcohol:6,nada:14},
+  alacena:  {food:26,agua:18,vendas:10,anti:8,madera:12,alcohol:8,balas:8,radio:5,nada:10},
+  ropero:   {tela:30,vendas:12,anti:8,arma1:10,arma2:5,libro:6,nada:20},
+  cama:     {tela:26,vendas:20,anti:4,nada:44},
+  mesa:     {food:20,chatarra:20,balas:12,libro:5,radio:6,nada:32},
+  estante:  {food:26,agua:22,madera:16,chatarra:14,libro:5,nada:14},
+  camilla:  {vendas:30,anti:20,alcohol:18,tela:16,nada:12},
+  botiquin: {vendas:34,anti:32,alcohol:20,nada:10},
+  casillero:{balas:18,chatarra:18,arma2:10,pistola:8,herram:8,tela:8,radio:6,nada:20},
+  herramienta:{herram:34,chatarra:22,madera:18,llave:12,nada:10},
+  vitrina:  {alcohol:16,vendas:14,anti:12,chatarra:12,arma1:8,nada:28},
+  bomba:    {gas:72,nada:28},
+  dumpster: {chatarra:26,tela:20,madera:16,food:10,gas:8,nada:20},
+  auto:     {chatarra:18,balas:14,agua:14,food:12,vendas:10,gas:10,llave:6,pistola:6,nada:10},
+  caja:     {madera:16,food:16,balas:14,agua:14,chatarra:14,vendas:12,arma1:8,nada:6}
+};
+// Pesos EXTRA que aporta el edificio (el cruce edificio × mueble).
+const BLD_LOOT={
+  ferreteria: {herram:30,madera:26,chatarra:24,llave:10},
+  farmacia:   {anti:34,vendas:30,alcohol:18,morfina:3},
+  hospital:   {vendas:30,anti:26,alcohol:14,morfina:4,libro:4},
+  comisaria:  {balas:22,pistola:14,cajabalas:10,arma2:10,chaleco:5},
+  carcel:     {chatarra:20,balas:14,arma2:12,herram:10,chaleco:3},
+  tienda:     {food:30,agua:26,alcohol:8},
+  bodega:     {food:34,agua:30,madera:14},
+  taller_mec: {chatarra:24,gas:26,llave:18,herram:10},
+  bar:        {alcohol:30,food:18,agua:14,arma2:8},
+  restaurante:{food:30,cruda:16,agua:14,alcohol:12},
+  escuela:    {libro:22,vendas:12,food:12,agua:12},
+  oficina:    {chatarra:22,food:10,agua:10,radio:6},
+  iglesia:    {tela:22,food:16,vendas:10},
+  barberia:   {tela:26,alcohol:20,arma1:8},
+  gasolinera: {gas:24,food:12,agua:12,chatarra:10}
+  // casa: sin extras — usa la tabla del mueble tal cual (cocina, recámara…)
+};
+function pickWeighted(tbl){
+  let tot=0;for(const k in tbl)tot+=tbl[k];
+  if(tot<=0)return null;
+  let r=Math.random()*tot;
+  for(const k in tbl){r-=tbl[k];if(r<=0)return k;}
+  return null;
+}
+function rollLoot(kind,bt){
+  const base=FURN_LOOT[kind]||FURN_LOOT.caja;
+  const tbl={};for(const k in base)tbl[k]=base[k];
+  const extra=BLD_LOOT[bt];                       // el edificio sesga la tabla
+  if(extra)for(const k in extra)tbl[k]=(tbl[k]||0)+extra[k];
+  for(let t=0;t<6;t++){                           // reintenta si el objeto no aplica
+    const id=pickWeighted(tbl);if(!id)break;
+    const D=LOOT_DEF[id];if(!D){delete tbl[id];continue;}
+    if(D.fn(kind)===false){delete tbl[id];continue;}   // p. ej. radio ya encontrada
+    if(D.rare){sfx(660,.18,'triangle',.06);sfx(880,.22,'triangle',.05);vib(40);}
+    return;
+  }
+  msg('Nada útil aquí…');
 }
 function tryLoot(){
   if(inCar)return;
@@ -819,8 +739,7 @@ function tryLoot(){
   nl.o.looted=true;nl.o.rt=rand(90,150);
   sfx(240,.1,'triangle',.04);
   const kind=nl.o.type?nl.o.type:(nl.label==='auto'?'auto':'caja');
-  if(maybeThemed(nl.o.bt,kind))return;         // botín según el tipo de edificio
-  rollLoot(kind);
+  rollLoot(kind,nl.o.bt);                      // tabla de pesos mueble × edificio
 }
 function useItem(k,silent){
   if(player.inv[k]<=0&&!silent)return;
