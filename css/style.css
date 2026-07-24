@@ -86,7 +86,9 @@ body.touch #cv{cursor:default}
   gap:11px;align-items:center;z-index:8}
 #actCol .abtn{width:62px;height:62px;display:none}
 #actCol #btnLoot{display:flex;opacity:.35}
-#actCol #btnCraft,#actCol #btnSkills{display:flex}
+#actCol #btnCraft,#actCol #btnSkills,#actCol #btnInv{display:flex}
+#btnLamp.have{display:flex}
+#btnLamp.on{border-color:#d9c26a;background:rgba(217,194,106,.2)}
 #btnLoot.on{opacity:1;border-color:#d9c26a}
 #btnGun.have{display:flex}
 #btnGun.sel{border-color:#d9c26a;background:rgba(217,194,106,.2)}
@@ -132,6 +134,19 @@ h1 em{font-style:normal;color:#a31621}
   padding:8px 11px;border-radius:3px;font-size:11px;letter-spacing:1px;cursor:pointer;flex-shrink:0}
 .rbtn:active{transform:scale(.95)}
 .rbtn:disabled{opacity:.35;cursor:default}
+
+/* panel de inventario */
+#inv{display:none;z-index:11}
+.isec{margin-top:12px;color:#d9c26a;font-size:12.5px;letter-spacing:1px;
+  border-bottom:1px dashed #39442e;padding-bottom:3px}
+.igrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:7px;margin-top:7px}
+.icell{border:1px solid #2c3324;background:#151a10;border-radius:3px;padding:7px 5px;
+  text-align:center;font-size:11px;color:#9aa885}
+.icell.off{opacity:.32}
+.icell .ig{font-size:21px;line-height:1.25}
+.icell .iq{color:#d9c26a;font-weight:bold}
+.icap{font-size:11px;color:#7d8a68;margin-top:6px;line-height:1.5}
+.icap b{color:#d9c26a}
 
 /* panel de habilidades */
 #skills{display:none;z-index:11}

@@ -21,6 +21,7 @@ const DOM={
   btnBed:$('btnBed'),btnBuild:$('btnBuild'),btnCook:$('btnCook'),btnSkills:$('btnSkills'),
   craft:$('craft'),craftMats:$('craftMats'),recList:$('recList'),
   skills:$('skills'),skillList:$('skillList'),
+  inv:$('inv'),invList:$('invList'),btnInv:$('btnInv'),btnLamp:$('btnLamp'),
   slots:{food:$('s0'),water:$('s1'),med:$('s2'),anti:$('s3')},
   slotN:{},moodle:{}
 };
@@ -87,7 +88,8 @@ const CFG={
   spawnCap:44,             // tope de zombis vivos a la vez
   biteChance:.12,          // probabilidad de infección por golpe recibido
   // sueño
-  sleepTimeScale:22, sleepRecover:13, sleepHeal:2.2
+  sleepTimeScale:22, sleepRecover:13, sleepHeal:2.2,
+  battLife:150             // segundos de luz que da cada pila del casco
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -106,7 +108,7 @@ function sfx(f,d,type,g,slide){if(muted)return;try{
 // SOLID: 0 libre, 1 muro, 2 ventana, 3 árbol, 4 objeto (mueble/caja/auto)
 let FLOOR,SOLID,WHUE,buildings,furns,crates,cars,treesL,statics,props;
 let player,zombies,corpses,parts,pools,shots,dmgs,cam;
-let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOpen=false,flashT=0,spawnT=0,freeze=0,shake=0;
+let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOpen=false,invOpen=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
@@ -142,7 +144,10 @@ const FURN={
 // herramientas: se saquean (sobre todo en la ferretería y garages) y se
 // NECESITAN para ciertas recetas — "cada estructura con sus herramientas".
 const TOOLS={hammer:{ic:'🔨',n:'Martillo'},saw:{ic:'🪚',n:'Serrucho'},
-  screw:{ic:'🪛',n:'Destornillador'},wrench:{ic:'🔧',n:'Llave inglesa'}};
+  screw:{ic:'🪛',n:'Destornillador'},wrench:{ic:'🔧',n:'Llave inglesa'},
+  crow:{ic:'🗝️',n:'Palanca'}};
+// Equipo que se lleva puesto (no se gasta como material).
+const GEAR={pack:{ic:'🎒',n:'Mochila'},helmet:{ic:'⛑️',n:'Casco de minero'}};
 
 // Roles de cuarto → paleta de muebles coherente para cada uno.
 const ROLE_FURN={
@@ -523,10 +528,11 @@ function init(){
     scrap:0,cloth:0,alcohol:0,armor:0,rawFood:0,
     skills:{carp:0,mech:0,elec:0,med:0,str:0},
     xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
-    tools:{hammer:false,saw:false,screw:false,wrench:false},
+    tools:{hammer:false,saw:false,screw:false,wrench:false,crow:false},
+    pack:false,helmet:false,helmOn:false,batt:0,battT:0,carKeys:0,
     inv:{food:1,water:1,med:0,anti:0}};
-  fires=[];crafting=false;skillsOpen=false;
-  DOM.craft.style.display='none';DOM.skills.style.display='none';
+  fires=[];crafting=false;skillsOpen=false;invOpen=false;
+  DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
   weather={type:'clear',t:rand(30,60),inten:0,target:0};amb=[];puffs=[];
   inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
@@ -620,8 +626,32 @@ function nearLoot(){
     if(d<1.9&&d<bd&&!c.looted){bd=d;best={o:c,label:'auto'};}}
   return best;
 }
+// La mochila duplica cuánto puedes cargar de cada consumible.
+function invCap(){return player.pack?12:6;}
+/* ── Casco de minero: lámpara manos libres que consume pilas ──
+   Una pila dura CFG.battLife segundos de luz encendida. Solo gasta de
+   noche o en interiores oscuros: encenderla a pleno sol no tiene sentido. */
+function helmetOn(){return !!(player&&player.helmet&&player.helmOn&&player.batt>0);}
+function helmetTick(dt){
+  if(!helmetOn())return;
+  if(darkness()<.25)return;                         // con luz de día no consume
+  player.battT=(player.battT||0)+dt;
+  if(player.battT>=CFG.battLife){
+    player.battT=0;player.batt--;
+    if(player.batt<=0){player.helmOn=false;
+      msg('🔋 Se acabaron las pilas del casco',true);sfx(150,.25,'square',.05,60);}
+    else msg('🔋 Pila gastada — quedan '+player.batt);
+  }
+}
+function toggleHelmet(){
+  if(!player.helmet){msg('No tienes casco de minero',true);return;}
+  if(!player.helmOn&&player.batt<=0){msg('Sin pilas — busca 🔋 en ferreterías',true);return;}
+  player.helmOn=!player.helmOn;
+  msg(player.helmOn?'⛑️ Lámpara encendida':'⛑️ Lámpara apagada');
+  sfx(player.helmOn?520:300,.09,'triangle',.05);
+}
 function addInv(k,label){
-  if(player.inv[k]>=6){msg(label+' — inventario lleno, lo usaste');useItem(k,true);return;}
+  if(player.inv[k]>=invCap()){msg(label+' — inventario lleno, lo usaste');useItem(k,true);return;}
   player.inv[k]++;msg(label+' (guardado)');
 }
 function giveGunOrAmmo(){
@@ -672,7 +702,15 @@ const LOOT_DEF={
   arma2:   {fn:()=>giveWeapon(2)},
   libro:   {fn:kind=>{const o=BOOK_SRC[kind]||['carp','mech','elec','med','str'];
     giveBook(o[irand(0,o.length)]);}},
+  pilas:   {fn:()=>{player.batt+=2;msg('🔋 Pilas (+2)');}},
+  llaves:  {fn:()=>{player.carKeys++;msg('🔑 Llaves de auto (+1)');}},
+  palanca: {fn:()=>{if(player.tools.crow)return false;giveTool('crow');return true;}},
   // RAROS: solo en su sitio, peso mínimo
+  mochila: {rare:1,fn:()=>{if(player.pack)return false;
+    player.pack=true;msg('🎒 ¡Una mochila! Ahora cargas el doble (12 por objeto)');return true;}},
+  casco:   {rare:1,fn:()=>{if(player.helmet)return false;
+    player.helmet=true;player.helmOn=true;player.batt+=2;
+    msg('⛑️ ¡Casco de minero! Lámpara manos libres (L) · +2 🔋');return true;}},
   arma3:   {rare:1,fn:()=>giveWeapon(3,'¡Un hallazgo!')},
   chaleco: {rare:1,fn:()=>{if(player.armor>50)return false;
     player.armor=100;msg('🦺 ¡Chaleco antibalas! (100)');return true;}},
@@ -685,15 +723,15 @@ const LOOT_DEF={
 // Tabla BASE por mueble (lo que ese mueble contiene en cualquier lado).
 const FURN_LOOT={
   nevera:   {food:30,cruda:26,agua:20,alcohol:6,nada:14},
-  alacena:  {food:26,agua:18,vendas:10,anti:8,madera:12,alcohol:8,balas:8,radio:5,nada:10},
-  ropero:   {tela:30,vendas:12,anti:8,arma1:10,arma2:5,libro:6,nada:20},
+  alacena:  {food:26,agua:18,vendas:10,anti:8,madera:12,alcohol:8,balas:8,radio:5,pilas:6,nada:10},
+  ropero:   {tela:30,vendas:12,anti:8,arma1:10,arma2:5,libro:6,mochila:4,llaves:4,nada:20},
   cama:     {tela:26,vendas:20,anti:4,nada:44},
-  mesa:     {food:20,chatarra:20,balas:12,libro:5,radio:6,nada:32},
-  estante:  {food:26,agua:22,madera:16,chatarra:14,libro:5,nada:14},
+  mesa:     {food:20,chatarra:20,balas:12,libro:5,radio:6,llaves:5,pilas:5,nada:32},
+  estante:  {food:26,agua:22,madera:16,chatarra:14,libro:5,pilas:6,nada:14},
   camilla:  {vendas:30,anti:20,alcohol:18,tela:16,nada:12},
   botiquin: {vendas:34,anti:32,alcohol:20,nada:10},
-  casillero:{balas:18,chatarra:18,arma2:10,pistola:8,herram:8,tela:8,radio:6,nada:20},
-  herramienta:{herram:34,chatarra:22,madera:18,llave:12,nada:10},
+  casillero:{balas:18,chatarra:18,arma2:10,pistola:8,herram:8,tela:8,radio:6,pilas:6,llaves:5,mochila:4,nada:20},
+  herramienta:{herram:34,chatarra:22,madera:18,llave:12,palanca:12,pilas:8,casco:5,nada:10},
   vitrina:  {alcohol:16,vendas:14,anti:12,chatarra:12,arma1:8,nada:28},
   bomba:    {gas:72,nada:28},
   silla:    {nada:58,tela:14,chatarra:12,food:8,balas:8},
@@ -703,23 +741,23 @@ const FURN_LOOT={
   escusado: {agua:26,anti:6,vendas:8,chatarra:8,nada:52},
   repisa:   {food:22,agua:18,madera:14,chatarra:14,libro:6,nada:26},
   dumpster: {chatarra:26,tela:20,madera:16,food:10,gas:8,nada:20},
-  auto:     {chatarra:18,balas:14,agua:14,food:12,vendas:10,gas:10,llave:6,pistola:6,nada:10},
-  caja:     {madera:16,food:16,balas:14,agua:14,chatarra:14,vendas:12,arma1:8,nada:6}
+  auto:     {chatarra:18,balas:14,agua:14,food:12,vendas:10,gas:10,llave:6,pistola:6,llaves:8,pilas:5,nada:10},
+  caja:     {madera:16,food:16,balas:14,agua:14,chatarra:14,vendas:12,arma1:8,pilas:6,nada:6}
 };
 // Pesos EXTRA que aporta el edificio (el cruce edificio × mueble).
 const BLD_LOOT={
-  ferreteria: {herram:30,madera:26,chatarra:24,llave:10},
+  ferreteria: {herram:30,madera:26,chatarra:24,llave:10,palanca:14,pilas:14,casco:6,arma3:4},
   farmacia:   {anti:34,vendas:30,alcohol:18,morfina:3},
   hospital:   {vendas:30,anti:26,alcohol:14,morfina:4,libro:4},
-  comisaria:  {balas:22,pistola:14,cajabalas:10,arma2:10,chaleco:5},
-  carcel:     {chatarra:20,balas:14,arma2:12,herram:10,chaleco:3},
-  tienda:     {food:30,agua:26,alcohol:8},
-  bodega:     {food:34,agua:30,madera:14},
-  taller_mec: {chatarra:24,gas:26,llave:18,herram:10},
+  comisaria:  {balas:22,pistola:14,cajabalas:10,arma2:10,arma3:4,chaleco:5,palanca:8,llaves:6,mochila:5},
+  carcel:     {chatarra:20,balas:14,arma2:12,arma3:3,herram:10,chaleco:3},
+  tienda:     {food:30,agua:26,alcohol:8,pilas:12,mochila:4},
+  bodega:     {food:34,agua:30,madera:14,palanca:6,casco:3},
+  taller_mec: {chatarra:24,gas:26,llave:18,herram:10,palanca:10,llaves:10,casco:4},
   bar:        {alcohol:30,food:18,agua:14,arma2:8},
   restaurante:{food:30,cruda:16,agua:14,alcohol:12},
-  escuela:    {libro:22,vendas:12,food:12,agua:12},
-  oficina:    {chatarra:22,food:10,agua:10,radio:6},
+  escuela:    {libro:22,vendas:12,food:12,agua:12,mochila:8,pilas:8},
+  oficina:    {chatarra:22,food:10,agua:10,radio:6,pilas:10,llaves:5},
   iglesia:    {tela:22,food:16,vendas:10},
   barberia:   {tela:26,alcohol:20,arma1:8},
   gasolinera: {gas:24,food:12,agua:12,chatarra:10}
@@ -793,7 +831,7 @@ function autoAim(maxD){
   return best;
 }
 function attack(){
-  if(player.cd>0||dead||inCar||player.sleeping||crafting||skillsOpen)return;
+  if(player.cd>0||dead||inCar||player.sleeping||crafting||skillsOpen||invOpen)return;
   if(player.useGun&&player.hasGun){shoot();return;}
   const w=MELEE[player.wTier];
   if(TOUCH)autoAim(w.range+2.2);
@@ -894,6 +932,12 @@ function loadGame(){
     if(!player.xp)player.xp={carp:0,mech:0,elec:0,med:0,str:0};
     if(!player.books)player.books=[];
     if(!player.tools)player.tools={hammer:false,saw:false,screw:false,wrench:false};
+    for(const t in TOOLS)if(player.tools[t]===undefined)player.tools[t]=false;
+    if(player.pack===undefined)player.pack=false;      // equipo añadido en v4
+    if(player.helmet===undefined){player.helmet=false;player.helmOn=false;}
+    if(player.batt===undefined)player.batt=0;
+    if(player.battT===undefined)player.battT=0;
+    if(player.carKeys===undefined)player.carKeys=0;
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -932,6 +976,7 @@ function update(dt){
   gameTime+=dt;
   player.slp=Math.max(0,player.slp-CFG.sleepDrain*dt);
   const day=dayNum(),night=isNight();
+  helmetTick(dt);                                   // la lámpara del casco gasta pilas
   updateWeather(dt);updateAmbient(dt);
   saveT-=dt;if(saveT<=0){saveT=25;saveGame();}      // autoguardado silencioso
   if(night&&!prevNight&&day>=2)horde();
@@ -1091,7 +1136,12 @@ function updateHUD(day,night){
   DOM.rRaw.textContent=player.rawFood;
   DOM.rArm.textContent=player.armor>0?'🦺'+Math.round(player.armor):'';
   let ts='';for(const t in TOOLS)if(player.tools&&player.tools[t])ts+=TOOLS[t].ic;
+  if(player.pack)ts+='🎒';
+  if(player.batt>0)ts+='🔋'+player.batt;
+  if(player.carKeys>0)ts+='🔑'+player.carKeys;
   DOM.rTools.textContent=ts;
+  DOM.btnLamp.classList.toggle('have',!!player.helmet);   // botón solo si tienes casco
+  DOM.btnLamp.classList.toggle('on',helmetOn());
   if(radioFound){DOM.obj.style.display='block';
     DOM.obj.textContent=day>=CFG.survivalDays?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!'
       :'🚁 Extracción: DÍA '+CFG.survivalDays+' · claro NE';}
@@ -1734,6 +1784,15 @@ function drawHuman(sx,sy,face,o){
       if(o.zom){ctx.strokeStyle='#5c0f14';ctx.lineWidth=1.2;
         ctx.beginPath();ctx.moveTo(-1.5,-24.6);ctx.lineTo(1.5,-24.6);ctx.stroke();}}
   }
+  if(o.helmet){                                     // casco de minero puesto
+    ctx.fillStyle='#d8a828';
+    ctx.beginPath();ctx.arc(0,-29.4,5.6,Math.PI,2*Math.PI);ctx.fill();
+    ctx.fillStyle='#b98d1c';ctx.fillRect(-6.2,-29.6,12.4,1.8);   // visera
+    ctx.fillStyle=o.lamp?'#fff2b8':'#8d8d84';                     // lámpara frontal
+    ctx.beginPath();ctx.arc(0,-31.6,1.7,0,7);ctx.fill();
+    if(o.lamp){ctx.fillStyle='rgba(255,236,160,.32)';
+      ctx.beginPath();ctx.arc(0,-31.6,4.4,0,7);ctx.fill();}
+  }
   ctx.restore();
 }
 
@@ -1866,6 +1925,7 @@ function draw(){
       const swingA=player.swing>0?lerp(.9,-1.15,player.swing/.18):.15;
       drawHuman(it._sx,it._sy,faceOf(player.dir),{shirt:'#5d738f',pants:'#3a4250',
         hair:'#3a2e22',walk:player.walk,swingA,pack:true,
+        helmet:player.helmet,lamp:helmetOn(),
         wTier:player.wTier,gun:player.useGun&&player.hasGun,gunFlash:player.gunFlash});
       if(player.swing>0){
         const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir));
@@ -1944,11 +2004,20 @@ function draw(){
     g.addColorStop(0,'rgba(0,0,0,.85)');g.addColorStop(1,'rgba(0,0,0,0)');
     lctx.fillStyle=g;lctx.beginPath();lctx.arc(px,py,85,0,7);lctx.fill();
     const fogR=1-foggy()*.4;                        // la niebla acorta tu visión
-    const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir)),R=280*fogR,half=.55;
+    // El casco de minero es una lámpara manos libres: alcanza más lejos y
+    // abre mucho más el cono. Sin él ves lo justo para no tropezar.
+    const lamp=helmetOn();
+    const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir));
+    const R=(lamp?340:190)*fogR,half=lamp?.72:.42;
     g=lctx.createRadialGradient(px,py,20,px,py,R);
-    g.addColorStop(0,'rgba(0,0,0,.95)');g.addColorStop(1,'rgba(0,0,0,0)');
+    g.addColorStop(0,'rgba(0,0,0,'+(lamp?.98:.9)+')');g.addColorStop(1,'rgba(0,0,0,0)');
     lctx.fillStyle=g;
     lctx.beginPath();lctx.moveTo(px,py);lctx.arc(px,py,R,a-half,a+half);lctx.closePath();lctx.fill();
+    if(lamp){                                       // halo cercano de la lámpara
+      g=lctx.createRadialGradient(px,py,10,px,py,120);
+      g.addColorStop(0,'rgba(0,0,0,.85)');g.addColorStop(1,'rgba(0,0,0,0)');
+      lctx.fillStyle=g;lctx.beginPath();lctx.arc(px,py,120,0,7);lctx.fill();
+    }
     for(const f of fires){                          // luz de fogatas y generadores
       const fx=g2sx(f.gx,f.gy)-cam.x+shx,fy=g2sy(f.gx,f.gy)-cam.y+shy-6;
       if(fx<-160||fx>VW+160||fy<-160||fy>VH+160)continue;
@@ -2056,10 +2125,12 @@ addEventListener('keydown',e=>{
   if((k==='p'||k==='escape')&&started&&!dead){
     if(crafting){toggleCraft();return;}
     if(skillsOpen){toggleSkills();return;}
+    if(invOpen){toggleInv();return;}
     paused=!paused;return;}
-  if(k==='c'&&started&&!dead&&!paused&&!skillsOpen){toggleCraft();return;}
-  if(k==='h'&&started&&!dead&&!paused&&!crafting){toggleSkills();return;}
-  if(!player||paused||crafting||skillsOpen||!started)return;
+  if(k==='c'&&started&&!dead&&!paused&&!skillsOpen&&!invOpen){toggleCraft();return;}
+  if(k==='h'&&started&&!dead&&!paused&&!crafting&&!invOpen){toggleSkills();return;}
+  if(k==='i'&&started&&!dead&&!paused){toggleInv();return;}
+  if(!player||paused||crafting||skillsOpen||invOpen||!started)return;
   if(k===' ')atkHold=true;
   if(k==='e')tryLoot();
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
@@ -2071,6 +2142,7 @@ addEventListener('keydown',e=>{
   if(k==='b')tryBuild();
   if(k==='z')trySleep();
   if(k==='x')tryCook();
+  if(k==='l')toggleHelmet();
   if(k==='g')manualSave();
 });
 addEventListener('keyup',e=>{const k=e.key.toLowerCase();keys[k]=false;if(k===' ')atkHold=false;});
@@ -2121,6 +2193,8 @@ bindTap('btnBed',trySleep);
 bindTap('btnBuild',tryBuild);
 bindTap('btnCook',tryCook);
 bindTap('btnSkills',toggleSkills);
+bindTap('btnInv',toggleInv);
+bindTap('btnLamp',toggleHelmet);
 const slotK=[['s0','food'],['s1','water'],['s2','med'],['s3','anti']];
 for(const[id,k]of slotK)bindTap(id,()=>useItem(k));
 
@@ -2142,9 +2216,13 @@ function enterExitCar(){
     inCar=null;msg('Bajaste del auto');return;}
   const c=nearCar();if(!c)return;
   if(!c.drivable){
-    if(sk('mech')>=2){c.drivable=true;gainXP('mech',25);
+    if(player.carKeys>0){                           // con llave arranca sin ruido
+      player.carKeys--;c.drivable=true;
+      msg('🔑 Probaste una llave… ¡y encendió! ('+player.carKeys+' restantes)');
+      sfx(420,.16,'triangle',.05);}
+    else if(sk('mech')>=2){c.drivable=true;gainXP('mech',25);
       msg('🔧 Hiciste puente al motor — ¡arrancó!');sfx(70,.4,'sawtooth',.06,140);}
-    else{msg('Este auto no enciende… (Mecánica 2 para hacer puente)',true);
+    else{msg('Este auto no enciende… (🔑 llaves o Mecánica 2 para puente)',true);
       sfx(90,.3,'sawtooth',.05,50);return;}}
   if(c.fuel<15&&player.gas>0){player.gas--;c.fuel+=30;msg('⛽ Echaste un bidón (+30)');}
   if(c.fuel<=0){msg('Sin gasolina — busca bidones en la GASOLINERA',true);return;}
@@ -2290,8 +2368,10 @@ function dismantleFurniture(w){
   if(!f)return false;
   const D=DISMANTLE[f.type];if(!D)return false;
   if(f.dhp===undefined)f.dhp=D.hp;
-  f.dhp-=w.dmg;shake=Math.max(shake,2);
-  sfx(150,.08,'square',.06);
+  // Con palanca se hace palanca: el doble de avance y mucho menos ruido.
+  const pry=player.tools.crow;
+  f.dhp-=w.dmg*(pry?2:1);shake=Math.max(shake,2);
+  sfx(pry?110:150,.08,'square',pry?.03:.06);
   if(f.dhp<=0){
     f.gone=true;SOLID[idx(ti,tj)]=0;
     for(const st of statics)if(st.kind==='furn'&&st.o===f)st.dead=true;
@@ -2534,6 +2614,65 @@ function renderSkills(){
   DOM.skillList.innerHTML=h;
 }
 
+/* ================= INVENTARIO ================= */
+// Vista única de todo lo que llevas encima: consumibles con su tope real
+// (la mochila lo duplica), materiales, herramientas, equipo y libros.
+function toggleInv(){
+  if(!started||dead||player.sleeping)return;
+  if(crafting)toggleCraft();
+  if(skillsOpen)toggleSkills();
+  invOpen=!invOpen;
+  DOM.inv.style.display=invOpen?'flex':'none';
+  if(invOpen){atkHold=false;renderInv();sfx(340,.06,'triangle',.04);}
+}
+const INV_ITEMS=[['food','🍖','Comida'],['water','💧','Agua'],
+  ['med','🩹','Vendas'],['anti','💊','Antibióticos']];
+function renderInv(){
+  const cap=invCap();
+  let h='<div class="isec">CONSUMIBLES · tope '+cap+' c/u</div><div class="igrid">';
+  for(const[k,ic,n]of INV_ITEMS){
+    const q=player.inv[k];
+    h+='<div class="icell'+(q?'':' off')+'"><div class="ig">'+ic+'</div>'+
+      n+'<br><span class="iq">'+q+'/'+cap+'</span></div>';
+  }
+  h+='</div><div class="isec">MATERIALES</div><div class="igrid">';
+  const mats=[['wood','🪵','Madera'],['scrap','🔩','Chatarra'],['cloth','🧵','Tela'],
+    ['alcohol','🧪','Alcohol'],['rawFood','🥩','Carne cruda'],['gas','⛽','Gasolina'],
+    ['ammo','🔸','Balas'],['batt','🔋','Pilas'],['carKeys','🔑','Llaves']];
+  for(const[k,ic,n]of mats){
+    const q=player[k]||0;
+    h+='<div class="icell'+(q?'':' off')+'"><div class="ig">'+ic+'</div>'+
+      n+'<br><span class="iq">'+q+'</span></div>';
+  }
+  h+='</div><div class="isec">HERRAMIENTAS</div><div class="igrid">';
+  for(const t in TOOLS){const has=player.tools[t];
+    h+='<div class="icell'+(has?'':' off')+'"><div class="ig">'+TOOLS[t].ic+'</div>'+
+      TOOLS[t].n+'</div>';}
+  h+='</div><div class="isec">EQUIPO</div><div class="igrid">';
+  h+='<div class="icell'+(player.pack?'':' off')+'"><div class="ig">🎒</div>Mochila<br>'+
+    '<span class="iq">'+(player.pack?'puesta':'—')+'</span></div>';
+  h+='<div class="icell'+(player.helmet?'':' off')+'"><div class="ig">⛑️</div>Casco<br>'+
+    '<span class="iq">'+(player.helmet?(player.helmOn?'encendido':'apagado'):'—')+'</span></div>';
+  h+='<div class="icell'+(player.armor>0?'':' off')+'"><div class="ig">🦺</div>Chaleco<br>'+
+    '<span class="iq">'+Math.round(player.armor)+'</span></div>';
+  const wn=MELEE[player.wTier].n;
+  h+='<div class="icell"><div class="ig">🗡️</div>'+wn+'<br><span class="iq">'+
+    (player.wTier?Math.round(player.wDur)+'/'+player.wDurMax:'—')+'</span></div>';
+  h+='<div class="icell'+(player.hasGun?'':' off')+'"><div class="ig">🔫</div>Pistola<br>'+
+    '<span class="iq">'+(player.hasGun?player.ammo+' balas':'—')+'</span></div>';
+  h+='</div>';
+  if(player.books.length){
+    h+='<div class="isec">LIBROS</div>';
+    player.books.forEach(bk=>{h+='<div class="brow"><span>📖 '+bk.name+'</span>'+
+      '<span style="color:#6f7c5c">leer en 🎓</span></div>';});
+  }
+  h+='<div class="icap">'+(player.pack?'🎒 Con mochila cargas <b>12</b> de cada consumible.'
+    :'Sin mochila cargas solo <b>6</b> de cada consumible — busca una 🎒.')+
+    (player.helmet?'<br>⛑️ La lámpara gasta una 🔋 cada '+CFG.battLife+' s encendida de noche.':'')+
+    '</div>';
+  DOM.invList.innerHTML=h;
+}
+
 /* ================= FABRICACIÓN ================= */
 // Materiales: se saquean de muebles temáticos (roperos→tela, casilleros→
 // chatarra, botiquines→alcohol) o talando árboles (madera).
@@ -2704,6 +2843,7 @@ DOM.skillList.addEventListener('click',e=>{
   if(b&&b.dataset.i!==undefined)readBook(+b.dataset.i);
 });
 $('btnSkillsClose').addEventListener('click',()=>{if(skillsOpen)toggleSkills();});
+$('btnInvClose').addEventListener('click',()=>{if(invOpen)toggleInv();});
 
 /* ================= EL CATADOR ================= */
 // El infiltrado del sistema. Como el catador que probaba cada plato del rey
