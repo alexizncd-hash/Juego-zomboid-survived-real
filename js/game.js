@@ -130,8 +130,14 @@ const FURN={
   ropero:{h:36,c:['#5c4426','#463317'],label:'ropero'},
   cama:{h:12,c:['#a34a52','#7a333b'],label:'cama'},
   mesa:{h:16,c:['#9a7a4a','#79603a'],label:'mesa'},
-  herramienta:{h:34,c:['#7a5a3a','#5c4326'],label:'estante de herramientas'},
-  vitrina:{h:28,c:['#b8c4cc','#8f9aa0'],label:'vitrina'}
+  herramienta:{h:34,c:['#7a5a3a','#5c4326'],label:'banco de trabajo'},
+  vitrina:{h:28,c:['#b8c4cc','#8f9aa0'],label:'vitrina'},
+  silla:{h:26,c:['#8a6a3f','#6d5130'],label:'silla'},
+  sofa:{h:26,c:['#63768a','#4f5f6b'],label:'sillón'},
+  estufa:{h:25,c:['#c2c6c4','#9aa0a4'],label:'estufa'},
+  lavamanos:{h:22,c:['#eef2f1','#c2c9c8'],label:'lavabo'},
+  escusado:{h:25,c:['#eaeeed','#c0c6c5'],label:'inodoro'},
+  repisa:{h:32,c:['#8d7048','#6a5233'],label:'repisa'}
 };
 // herramientas: se saquean (sobre todo en la ferretería y garages) y se
 // NECESITAN para ciertas recetas — "cada estructura con sus herramientas".
@@ -140,23 +146,23 @@ const TOOLS={hammer:{ic:'🔨',n:'Martillo'},saw:{ic:'🪚',n:'Serrucho'},
 
 // Roles de cuarto → paleta de muebles coherente para cada uno.
 const ROLE_FURN={
-  cocina:['nevera','alacena','alacena','mesa'],
-  recamara:['cama','ropero','ropero'],
-  bano:['botiquin','estante','ropero'],
-  almacen:['estante','estante','estante'],
-  sala:['mesa','estante','ropero'],
+  cocina:['estufa','nevera','alacena','alacena','mesa','silla'],
+  recamara:['cama','ropero','silla','repisa'],
+  bano:['escusado','lavamanos','botiquin','repisa'],
+  almacen:['estante','estante','repisa'],
+  sala:['sofa','mesa','silla','repisa','ropero'],
   taller:['herramienta','herramienta','estante','mesa'],
-  celda:['cama','casillero'],
-  vestidor:['casillero','casillero','ropero'],
-  clinica:['camilla','camilla','botiquin'],
-  farm:['botiquin','vitrina','estante'],
-  oficina:['mesa','estante','casillero'],
-  comercio:['estante','estante','vitrina','nevera'],
-  bar:['mesa','mesa','estante','nevera'],
-  cocina_ind:['nevera','nevera','alacena','mesa'],
+  celda:['cama','escusado','casillero'],
+  vestidor:['casillero','casillero','lavamanos','ropero'],
+  clinica:['camilla','camilla','botiquin','lavamanos'],
+  farm:['botiquin','vitrina','estante','repisa'],
+  oficina:['mesa','silla','estante','casillero','sofa'],
+  comercio:['estante','estante','vitrina','nevera','repisa'],
+  bar:['mesa','silla','silla','estante','nevera'],
+  cocina_ind:['estufa','nevera','nevera','alacena','mesa'],
   garage:['herramienta','estante','mesa'],
-  aula:['mesa','mesa','estante'],
-  altar:['mesa','estante']
+  aula:['mesa','mesa','silla','silla','repisa'],
+  altar:['mesa','silla','repisa']
 };
 // Composición de cuartos por tipo de edificio (rol por cuarto).
 const BUILD_ROLES={
@@ -184,7 +190,8 @@ const BUILD_PRIMARY={casa:'recamara',hospital:'clinica',carcel:'celda',
 // Mueble insignia que SIEMPRE aparece si el cuarto tiene su rol (coherencia).
 const ROLE_KEY={recamara:'cama',cocina:'nevera',clinica:'camilla',
   farm:'botiquin',celda:'cama',taller:'herramienta',cocina_ind:'nevera',
-  almacen:'estante',comercio:'estante',bar:'mesa',bano:'botiquin'};
+  almacen:'estante',comercio:'estante',bar:'mesa',bano:'escusado',
+  sala:'sofa',oficina:'mesa',aula:'mesa',vestidor:'casillero'};
 
 const EP={x:MW-9,y:9};
 const SPECIALS=[
@@ -689,6 +696,12 @@ const FURN_LOOT={
   herramienta:{herram:34,chatarra:22,madera:18,llave:12,nada:10},
   vitrina:  {alcohol:16,vendas:14,anti:12,chatarra:12,arma1:8,nada:28},
   bomba:    {gas:72,nada:28},
+  silla:    {nada:58,tela:14,chatarra:12,food:8,balas:8},
+  sofa:     {tela:26,nada:44,balas:10,food:10,chatarra:8,libro:6},
+  estufa:   {food:26,cruda:14,chatarra:20,gas:14,nada:26},
+  lavamanos:{agua:34,alcohol:10,vendas:10,chatarra:10,nada:36},
+  escusado: {agua:26,anti:6,vendas:8,chatarra:8,nada:52},
+  repisa:   {food:22,agua:18,madera:14,chatarra:14,libro:6,nada:26},
   dumpster: {chatarra:26,tela:20,madera:16,food:10,gas:8,nada:20},
   auto:     {chatarra:18,balas:14,agua:14,food:12,vendas:10,gas:10,llave:6,pistola:6,nada:10},
   caja:     {madera:16,food:16,balas:14,agua:14,chatarra:14,vendas:12,arma1:8,nada:6}
@@ -1291,76 +1304,227 @@ function drawWall(st,night){
       ctx.beginPath();ctx.moveTo(sx-6,sy-WALLH*.4);ctx.lineTo(sx+6,sy-WALLH*.35);ctx.stroke();}
   }
 }
+/* ── Muebles como OBJETOS REALES ──
+   Nada de cubos pintados: cada mueble se compone de piezas (patas, tablero,
+   respaldo, cajones, tarja…) con `boxIso`, que extruye una caja entre dos
+   esquinas del tile. Las coordenadas van en fracciones 0..1 dentro del tile,
+   así que cada pieza se coloca como en un plano de carpintería.  */
 function drawFurn(st){
   const f=st.o,F=FURN[f.type],ty=f.type;
   const sx=g2sx(st.gx+.5,st.gy+.5),sy=g2sy(st.gx+.5,st.gy+.5);
   groundShadow(st.gx,st.gy,14,7);
-  // muebles bajos (mesa, cama, camilla) se dibujan como tablero + patas,
-  // no como bloque; el resto como armario con detalle.
-  if(ty==='mesa'){
-    for(const[lx,ly]of[[-.28,-.28],[.28,-.28],[.28,.28],[-.28,.28]]){
-      const px=g2sx(st.gx+.5+lx,st.gy+.5+ly),py=g2sy(st.gx+.5+lx,st.gy+.5+ly);
-      ctx.fillStyle='#5e4a2c';ctx.fillRect(px-1.5,py-13,3,13);}
-    cube(st.gx,st.gy,4,['#9a7a4a','#79603a','#b08a54'],.78);
-  }else if(ty==='cama'){
-    cube(st.gx,st.gy,6,['#6a4f38','#523c2a','#7a5c42'],.9);        // base de madera
-    ctx.fillStyle='#8f6d78';                                       // colchón/cobija
-    ctx.beginPath();ctx.ellipse(sx,sy-8,15,8,0,0,7);ctx.fill();
-    ctx.fillStyle='#a34a52';ctx.beginPath();ctx.ellipse(sx+4,sy-8,10,6,0,0,7);ctx.fill();
-    ctx.fillStyle='#eae4d6';ctx.beginPath();ctx.ellipse(sx-9,sy-9,6,4,0,0,7);ctx.fill(); // almohada
-  }else if(ty==='camilla'){
-    for(const[lx,ly]of[[-.3,-.3],[.3,.3]]){
-      const px=g2sx(st.gx+.5+lx,st.gy+.5+ly),py=g2sy(st.gx+.5+lx,st.gy+.5+ly);
-      ctx.fillStyle='#8b9096';ctx.fillRect(px-1.5,py-12,3,12);}
-    cube(st.gx,st.gy,10,['#c9cdc9','#9aa09a','#dfe3df'],.82);
-    ctx.strokeStyle='#c94a3a';ctx.lineWidth=2;                     // cruz roja
-    ctx.beginPath();ctx.moveTo(sx-4,sy-12);ctx.lineTo(sx+4,sy-12);
-    ctx.moveTo(sx,sy-16);ctx.lineTo(sx,sy-8);ctx.stroke();
-  }else{
-    cube(st.gx,st.gy,F.h,[F.c[0],F.c[1],F.c[0]],.82);
-    const topY=sy-F.h;
-    if(ty==='nevera'){
-      ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.5;
-      ctx.beginPath();ctx.moveTo(sx-11,sy-F.h*.55);ctx.lineTo(sx+9,sy-F.h*.55-3);ctx.stroke(); // división
-      ctx.strokeStyle='#8a8f8a';ctx.lineWidth=2.4;                 // manija
-      ctx.beginPath();ctx.moveTo(sx-9,topY+11);ctx.lineTo(sx-9,topY+20);ctx.stroke();
-    }else if(ty==='estante'){
-      ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=1;
-      for(let s=1;s<=2;s++){const yy=sy-F.h*(s/3);
-        ctx.beginPath();ctx.moveTo(sx-11,yy+3);ctx.lineTo(sx+9,yy);ctx.stroke();}
-      const cans=['#b0503a','#3d6a8a','#5a8a4a','#c9a83a'];        // productos
-      for(let s=0;s<4;s++){ctx.fillStyle=cans[s%4];
-        ctx.fillRect(sx-9+s*5,sy-F.h*((s%2)+1)/3-6,3.5,6);}
-    }else if(ty==='ropero'||ty==='alacena'){
-      ctx.strokeStyle='rgba(0,0,0,.32)';ctx.lineWidth=1;           // dos puertas
-      ctx.beginPath();ctx.moveTo(sx,topY+3);ctx.lineTo(sx,sy-2);ctx.stroke();
-      ctx.fillStyle='#c9b98a';                                     // manijas
-      ctx.beginPath();ctx.arc(sx-3,sy-F.h*.5,1.3,0,7);ctx.fill();
-      ctx.beginPath();ctx.arc(sx+3,sy-F.h*.5,1.3,0,7);ctx.fill();
-    }else if(ty==='casillero'){
-      ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1;            // rejillas
-      for(let s=1;s<=3;s++){const yy=topY+5+s*4;
-        ctx.beginPath();ctx.moveTo(sx-8,yy);ctx.lineTo(sx+7,yy-1.5);ctx.stroke();}
-      ctx.fillStyle='#d9c26a';ctx.beginPath();ctx.arc(sx-6,sy-F.h*.42,1.4,0,7);ctx.fill();
-    }else if(ty==='botiquin'){
-      ctx.fillStyle='#c94a3a';ctx.fillRect(sx-2,topY+6,4,10);ctx.fillRect(sx-5,topY+9,10,4);
-    }else if(ty==='bomba'){
-      ctx.fillStyle='#1c1c18';ctx.fillRect(sx-7,topY+5,14,7);      // pantalla
-      ctx.fillStyle='#7dd97d';ctx.fillRect(sx-5,topY+7,10,3);
-      ctx.strokeStyle='#2a2a26';ctx.lineWidth=2;                   // manguera
-      ctx.beginPath();ctx.moveTo(sx+8,topY+9);ctx.quadraticCurveTo(sx+14,sy-6,sx+11,sy);ctx.stroke();
-    }else if(ty==='herramienta'){                                  // panel con herramientas
-      ctx.strokeStyle='#c9c2b0';ctx.lineWidth=1.6;
-      ctx.beginPath();ctx.moveTo(sx-6,topY+8);ctx.lineTo(sx-6,topY+16);ctx.stroke(); // martillo
-      ctx.fillStyle='#8a5a3a';ctx.fillRect(sx-8,topY+6,5,3);
-      ctx.strokeStyle='#b9b9ad';ctx.lineWidth=2;                   // llave
-      ctx.beginPath();ctx.arc(sx+4,topY+9,2.4,0,7);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(sx+4,topY+11);ctx.lineTo(sx+4,topY+18);ctx.stroke();
-    }else if(ty==='vitrina'){                                      // vidrio con reflejo
-      ctx.fillStyle='rgba(160,195,215,.5)';ctx.fillRect(sx-9,topY+5,18,F.h-8);
-      ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(sx-6,topY+7);ctx.lineTo(sx-1,topY+F.h-4);ctx.stroke();
+  // pieza del mueble en coordenadas 0..1 del tile
+  const B=(a,b,c,d,lift,h,cols)=>boxIso(st.gx+a,st.gy+b,st.gx+c,st.gy+d,lift,h,cols);
+  // punto de la superficie del tile, elevado `lift` px (para poner objetos encima)
+  const S=(a,b,lift)=>[g2sx(st.gx+a,st.gy+b),g2sy(st.gx+a,st.gy+b)-(lift||0)];
+  // paleta a partir de un color: [cara SO, cara SE, tapa]
+  const pal=c=>[shade(c,-26),shade(c,-48),c];
+  const legs=(h,col,inset)=>{const q=inset||.22;
+    for(const[a,b]of[[q,q],[1-q,q],[1-q,1-q],[q,1-q]])
+      B(a-.045,b-.045,a+.045,b+.045,0,h,pal(col));};
+
+  if(ty==='mesa'){                                   // mesa de comedor + servicio
+    legs(13,'#7a5c34');
+    B(.08,.08,.92,.92,13,3.5,pal('#a98253'));        // tablero con vuelo
+    const[px,py]=S(.42,.5,17);                       // plato
+    ctx.fillStyle='#e8e4d8';ctx.beginPath();ctx.ellipse(px,py,7,3.6,0,0,7);ctx.fill();
+    ctx.fillStyle='#cfcabb';ctx.beginPath();ctx.ellipse(px,py,4,2,0,0,7);ctx.fill();
+    const[cx,cy]=S(.68,.36,17);                      // vaso
+    ctx.fillStyle='#9fb6c4';ctx.fillRect(cx-2.4,cy-7,4.8,7);
+    ctx.fillStyle='#c4d6e0';ctx.beginPath();ctx.ellipse(cx,cy-7,2.4,1.2,0,0,7);ctx.fill();
+    ctx.strokeStyle='#b9b9ad';ctx.lineWidth=1.2;     // cubiertos
+    const[ux,uy]=S(.3,.66,17);
+    ctx.beginPath();ctx.moveTo(ux-2,uy-3);ctx.lineTo(ux+2,uy+1);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(ux+1,uy-4);ctx.lineTo(ux+5,uy);ctx.stroke();
+
+  }else if(ty==='silla'){                            // silla con respaldo
+    legs(11,'#6d5130',.28);
+    B(.26,.26,.74,.74,11,3,pal('#8a6a3f'));          // asiento
+    B(.26,.24,.74,.32,14,15,pal('#7a5c34'));         // respaldo
+    ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;
+    const[bx,by]=S(.5,.28,22);
+    ctx.beginPath();ctx.moveTo(bx-9,by);ctx.lineTo(bx+9,by);ctx.stroke();
+
+  }else if(ty==='cama'){                             // cama: cabecera, colchón, almohada, cobija
+    legs(5,'#5a4128',.16);
+    B(.14,.06,.86,.12,0,30,pal('#6b4d2e'));          // cabecera
+    B(.16,.1,.84,.92,5,4,pal('#7a5a36'));            // bastidor
+    B(.18,.14,.82,.9,9,6,pal('#e6e0d2'));            // colchón
+    B(.18,.44,.82,.9,15,2.5,pal('#9a4a52'));         // cobija doblada
+    B(.28,.16,.72,.32,15,3.5,pal('#f2eee4'));        // almohada
+    ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=1;
+    const[mx,my]=S(.5,.44,21);
+    ctx.beginPath();ctx.moveTo(mx-13,my);ctx.lineTo(mx+13,my);ctx.stroke();
+
+  }else if(ty==='camilla'){                          // camilla de hospital con barandal
+    legs(12,'#7d858c',.2);
+    B(.16,.1,.84,.9,12,4,pal('#cfd4d6'));            // colchón
+    B(.26,.14,.74,.3,16,3,pal('#eef1f2'));           // almohada
+    B(.14,.34,.18,.86,12,9,pal('#9aa2a8'));          // barandales laterales
+    B(.82,.34,.86,.86,12,9,pal('#9aa2a8'));
+    ctx.strokeStyle='#c94a3a';ctx.lineWidth=2;       // cruz roja en el pie
+    const[qx,qy]=S(.5,.86,18);
+    ctx.beginPath();ctx.moveTo(qx-4,qy);ctx.lineTo(qx+4,qy);
+    ctx.moveTo(qx,qy-4);ctx.lineTo(qx,qy+4);ctx.stroke();
+
+  }else if(ty==='sofa'){                             // sillón de sala
+    B(.08,.2,.92,.84,0,10,pal('#4f5f6b'));           // base
+    B(.14,.28,.86,.8,10,4,pal('#63768a'));           // cojines
+    B(.08,.16,.92,.28,0,26,pal('#586a78'));          // respaldo
+    B(.04,.2,.16,.86,0,17,pal('#59697a'));           // apoyabrazos
+    B(.84,.2,.96,.86,0,17,pal('#59697a'));
+    ctx.strokeStyle='rgba(0,0,0,.22)';ctx.lineWidth=1;
+    const[vx,vy]=S(.5,.54,14);                       // costura entre cojines
+    ctx.beginPath();ctx.moveTo(vx-6,vy-7);ctx.lineTo(vx+7,vy+1);ctx.stroke();
+
+  }else if(ty==='nevera'){                           // refrigerador de dos puertas
+    B(.18,.22,.82,.8,0,36,pal('#d2d6d3'));
+    B(.16,.2,.84,.82,36,2.5,pal('#b6bab7'));         // tapa
+    const[dx,dy]=S(.18,.51,0);                       // separación congelador
+    ctx.strokeStyle='rgba(0,0,0,.35)';ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(dx,dy-13);ctx.lineTo(dx+21,dy-2);ctx.stroke();
+    ctx.strokeStyle='#7f847f';ctx.lineWidth=2.6;     // manijas verticales
+    ctx.beginPath();ctx.moveTo(dx+3,dy-30);ctx.lineTo(dx+3,dy-19);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(dx+3,dy-11);ctx.lineTo(dx+3,dy-2);ctx.stroke();
+    ctx.fillStyle='#c9b96a';                          // imán en la puerta
+    ctx.fillRect(dx+11,dy-24,3,4);
+
+  }else if(ty==='estufa'){                           // estufa con quemadores y horno
+    B(.14,.2,.86,.82,0,22,pal('#c2c6c4'));           // cuerpo
+    const top=B(.11,.17,.89,.85,22,3,pal('#43464a'));// parrilla
+    for(const[a,b]of[[.32,.4],[.66,.4],[.32,.68],[.66,.68]]){
+      const[bx,by]=S(a,b,26);                        // quemadores
+      ctx.fillStyle='#2b2e31';ctx.beginPath();ctx.ellipse(bx,by,5.4,2.7,0,0,7);ctx.fill();
+      ctx.strokeStyle='#5d6165';ctx.lineWidth=1;
+      ctx.beginPath();ctx.ellipse(bx,by,3,1.5,0,0,7);ctx.stroke();}
+    const[ox,oy]=S(.18,.5,0);                        // puerta del horno
+    ctx.fillStyle='rgba(30,34,38,.55)';
+    ctx.beginPath();ctx.moveTo(ox+2,oy-16);ctx.lineTo(ox+18,oy-7);
+    ctx.lineTo(ox+18,oy+1);ctx.lineTo(ox+2,oy-8);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='#8d9296';ctx.lineWidth=2;       // manija del horno
+    ctx.beginPath();ctx.moveTo(ox+2,oy-14);ctx.lineTo(ox+18,oy-5);ctx.stroke();
+    ctx.fillStyle='#9aa0a4';                          // perillas
+    for(let k=0;k<3;k++){ctx.beginPath();ctx.arc(ox+5+k*5,oy-20+k*2.6,1.5,0,7);ctx.fill();}
+
+  }else if(ty==='lavamanos'){                        // lavabo con pedestal y grifo
+    B(.4,.42,.6,.62,0,15,pal('#dfe3e2'));            // pedestal
+    B(.24,.28,.76,.74,15,7,pal('#eef2f1'));          // tarja
+    const[bx,by]=S(.5,.51,22);
+    ctx.fillStyle='#b9c2c4';ctx.beginPath();ctx.ellipse(bx,by,11,5.5,0,0,7);ctx.fill();
+    ctx.fillStyle='#8f9a9e';ctx.beginPath();ctx.ellipse(bx,by+.5,4,2,0,0,7);ctx.fill();
+    ctx.strokeStyle='#a8b0b4';ctx.lineWidth=2.2;     // grifo
+    const[gx2,gy2]=S(.5,.32,22);
+    ctx.beginPath();ctx.moveTo(gx2,gy2);ctx.lineTo(gx2,gy2-8);
+    ctx.quadraticCurveTo(gx2+1,gy2-11,gx2+4,gy2-10);ctx.stroke();
+
+  }else if(ty==='escusado'){                         // inodoro con tanque
+    B(.3,.18,.7,.34,0,25,pal('#e4e8e7'));            // tanque
+    B(.33,.36,.67,.76,0,13,pal('#eaeeed'));          // taza
+    const[bx,by]=S(.5,.56,13);
+    ctx.fillStyle='#f4f7f6';ctx.beginPath();ctx.ellipse(bx,by,10,5.4,0,0,7);ctx.fill();
+    ctx.fillStyle='#9fa9ac';ctx.beginPath();ctx.ellipse(bx,by,6,3.1,0,0,7);ctx.fill();
+    ctx.fillStyle='#b6bec0';                          // palanca de descarga
+    const[tx,ty2]=S(.34,.28,25);ctx.fillRect(tx,ty2-3,3.2,2);
+
+  }else if(ty==='estante'||ty==='repisa'){           // estantería ABIERTA con productos
+    B(.14,.24,.2,.78,0,32,pal('#7a6242'));           // costados
+    B(.8,.24,.86,.78,0,32,pal('#7a6242'));
+    const cans=['#b0503a','#3d6a8a','#5a8a4a','#c9a83a','#a8683a'];
+    for(let s=0;s<3;s++){                            // 3 entrepaños con mercancía
+      const lift=6+s*11;
+      B(.14,.24,.86,.78,lift,2,pal('#8d7048'));
+      for(let k=0;k<3;k++){
+        const[ix,iy]=S(.28+k*.2,.5,lift+2);
+        ctx.fillStyle=cans[(s*3+k)%cans.length];
+        ctx.fillRect(ix-2.6,iy-7,5.2,7);
+        ctx.fillStyle='rgba(255,255,255,.22)';ctx.fillRect(ix-2.6,iy-5.5,5.2,1.4);}
     }
+
+  }else if(ty==='ropero'){                           // ropero con cornisa y tiradores
+    B(.18,.26,.82,.78,0,36,pal('#6a4a28'));
+    B(.15,.23,.85,.81,36,3,pal('#5b3f22'));          // cornisa
+    const[dx,dy]=S(.18,.52,0);
+    ctx.strokeStyle='rgba(0,0,0,.34)';ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(dx+10,dy-25);ctx.lineTo(dx+10,dy-6);ctx.stroke();
+    ctx.fillStyle='#d3c08c';                          // tiradores
+    ctx.beginPath();ctx.arc(dx+7.5,dy-16,1.5,0,7);ctx.fill();
+    ctx.beginPath();ctx.arc(dx+12.5,dy-14,1.5,0,7);ctx.fill();
+
+  }else if(ty==='alacena'){                          // gabinete con cubierta y cajones
+    B(.14,.24,.86,.8,0,24,pal('#8a6438'));
+    B(.1,.2,.9,.84,24,3.5,pal('#9aa0a2'));           // cubierta de granito
+    const[dx,dy]=S(.14,.52,0);
+    ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.1;
+    ctx.beginPath();ctx.moveTo(dx+1,dy-14);ctx.lineTo(dx+23,dy-2);ctx.stroke();
+    ctx.strokeStyle='#cbbb8d';ctx.lineWidth=1.8;     // jaladeras horizontales
+    ctx.beginPath();ctx.moveTo(dx+6,dy-17);ctx.lineTo(dx+14,dy-13);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(dx+6,dy-8);ctx.lineTo(dx+14,dy-4);ctx.stroke();
+
+  }else if(ty==='casillero'){                        // fila de casilleros con rejillas
+    B(.18,.28,.82,.76,0,38,pal('#43566a'));
+    B(.16,.26,.84,.78,38,2.5,pal('#37475a'));
+    const[dx,dy]=S(.18,.52,0);
+    ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=1.3;
+    ctx.beginPath();ctx.moveTo(dx+11,dy-27);ctx.lineTo(dx+11,dy-6);ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,.32)';ctx.lineWidth=1;
+    for(let s=0;s<3;s++){                            // rejillas de ventilación
+      ctx.beginPath();ctx.moveTo(dx+3,dy-31+s*2.6);ctx.lineTo(dx+9,dy-28+s*2.6);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(dx+13,dy-26+s*2.6);ctx.lineTo(dx+19,dy-23+s*2.6);ctx.stroke();}
+    ctx.fillStyle='#d9c26a';                          // candados
+    ctx.beginPath();ctx.arc(dx+8,dy-15,1.5,0,7);ctx.fill();
+    ctx.beginPath();ctx.arc(dx+18,dy-10,1.5,0,7);ctx.fill();
+
+  }else if(ty==='botiquin'){                         // botiquín colgado en la pared
+    B(.26,.32,.74,.6,15,17,pal('#e2e6e5'));
+    const[cx,cy]=S(.26,.46,15);
+    ctx.fillStyle='#c94a3a';                          // cruz roja
+    ctx.fillRect(cx+8,cy-13,3.4,9);ctx.fillRect(cx+5.2,cy-10.2,9,3.4);
+    ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(cx+16,cy-15);ctx.lineTo(cx+16,cy-4);ctx.stroke();
+
+  }else if(ty==='herramienta'){                      // banco de trabajo con panel
+    legs(12,'#6a5233',.2);
+    B(.1,.4,.9,.9,12,3.5,pal('#8a6c42'));            // mesa de trabajo
+    B(.14,.28,.86,.34,14,26,pal('#5d6a52'));         // panel perforado
+    const[hx,hy]=S(.32,.31,26);
+    ctx.strokeStyle='#c9c2b0';ctx.lineWidth=1.8;     // martillo colgado
+    ctx.beginPath();ctx.moveTo(hx,hy);ctx.lineTo(hx,hy+9);ctx.stroke();
+    ctx.fillStyle='#8a5a3a';ctx.fillRect(hx-3,hy-3,6,3.4);
+    const[wx,wy]=S(.58,.31,26);
+    ctx.strokeStyle='#b9b9ad';ctx.lineWidth=2;       // llave inglesa
+    ctx.beginPath();ctx.arc(wx,wy+1,2.4,.6,5.6);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(wx,wy+3.4);ctx.lineTo(wx,wy+11);ctx.stroke();
+    const[sx2,sy2]=S(.76,.31,26);
+    ctx.strokeStyle='#a8adb2';ctx.lineWidth=1.6;     // serrucho
+    ctx.beginPath();ctx.moveTo(sx2-3,sy2+1);ctx.lineTo(sx2+3,sy2+9);ctx.stroke();
+
+  }else if(ty==='vitrina'){                          // vitrina de cristal con marco
+    B(.16,.3,.84,.72,0,9,pal('#8a9299'));            // base
+    B(.16,.3,.2,.72,9,26,pal('#7c848b'));            // postes del marco
+    B(.8,.3,.84,.72,9,26,pal('#7c848b'));
+    const[gx3,gy3]=S(.16,.51,9);
+    ctx.fillStyle='rgba(168,202,222,.42)';           // cristal
+    ctx.beginPath();ctx.moveTo(gx3+2,gy3-26);ctx.lineTo(gx3+20,gy3-16);
+    ctx.lineTo(gx3+20,gy3+1);ctx.lineTo(gx3+2,gy3-9);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(gx3+6,gy3-22);ctx.lineTo(gx3+11,gy3-6);ctx.stroke();
+    B(.2,.34,.8,.68,15,1.6,pal('#96a0a6'));          // entrepaño
+    for(let k=0;k<2;k++){const[ix,iy]=S(.36+k*.28,.5,17);
+      ctx.fillStyle=k?'#c9a83a':'#b0503a';ctx.fillRect(ix-2.4,iy-6,4.8,6);}
+
+  }else if(ty==='bomba'){                            // despachador de gasolina
+    B(.28,.3,.72,.7,0,30,pal('#a8362c'));
+    B(.25,.27,.75,.73,30,3,pal('#8d2a22'));
+    const[px2,py2]=S(.28,.5,0);
+    ctx.fillStyle='#15161a';ctx.fillRect(px2+4,py2-26,13,8);   // pantalla
+    ctx.fillStyle='#7dd97d';ctx.fillRect(px2+6,py2-24,9,4);
+    ctx.strokeStyle='#26262a';ctx.lineWidth=2.2;              // manguera
+    ctx.beginPath();ctx.moveTo(px2+20,py2-16);
+    ctx.quadraticCurveTo(px2+28,py2-4,px2+23,py2+3);ctx.stroke();
+    ctx.fillStyle='#3a3a3e';ctx.fillRect(px2+21,py2+2,4,5);   // pistola
+
+  }else{                                             // respaldo genérico
+    B(.16,.22,.84,.8,0,F.h,pal(F.c[0]));
   }
   if(!f.looted){ctx.fillStyle='#d9c26a';
     ctx.beginPath();ctx.arc(sx,sy-F.h-6,2.5,0,7);ctx.fill();}
@@ -2108,7 +2272,15 @@ const DISMANTLE={
   ropero:{hp:40,yield:{wood:2,cloth:1}},
   cama:{hp:35,yield:{wood:2,cloth:1}},
   mesa:{hp:28,yield:{wood:2}},
-  bomba:{hp:70,yield:{scrap:2}}
+  bomba:{hp:70,yield:{scrap:2}},
+  silla:{hp:18,yield:{wood:1}},
+  sofa:{hp:38,yield:{wood:1,cloth:3}},
+  estufa:{hp:60,yield:{scrap:3}},
+  lavamanos:{hp:34,yield:{scrap:2}},
+  escusado:{hp:34,yield:{scrap:1}},
+  repisa:{hp:26,yield:{wood:2}},
+  herramienta:{hp:45,yield:{wood:2,scrap:1}},
+  vitrina:{hp:30,yield:{scrap:2}}
 };
 function dismantleFurniture(w){
   const ti=Math.floor(player.gx+Math.cos(player.dir)*1.05),
