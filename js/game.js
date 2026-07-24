@@ -138,6 +138,54 @@ const FURN={
 const TOOLS={hammer:{ic:'🔨',n:'Martillo'},saw:{ic:'🪚',n:'Serrucho'},
   screw:{ic:'🪛',n:'Destornillador'},wrench:{ic:'🔧',n:'Llave inglesa'}};
 
+// Roles de cuarto → paleta de muebles coherente para cada uno.
+const ROLE_FURN={
+  cocina:['nevera','alacena','alacena','mesa'],
+  recamara:['cama','ropero','ropero'],
+  bano:['botiquin','estante','ropero'],
+  almacen:['estante','estante','estante'],
+  sala:['mesa','estante','ropero'],
+  taller:['herramienta','herramienta','estante','mesa'],
+  celda:['cama','casillero'],
+  vestidor:['casillero','casillero','ropero'],
+  clinica:['camilla','camilla','botiquin'],
+  farm:['botiquin','vitrina','estante'],
+  oficina:['mesa','estante','casillero'],
+  comercio:['estante','estante','vitrina','nevera'],
+  bar:['mesa','mesa','estante','nevera'],
+  cocina_ind:['nevera','nevera','alacena','mesa'],
+  garage:['herramienta','estante','mesa'],
+  aula:['mesa','mesa','estante'],
+  altar:['mesa','estante']
+};
+// Composición de cuartos por tipo de edificio (rol por cuarto).
+const BUILD_ROLES={
+  casa:['recamara','cocina','recamara','bano','sala','garage'],
+  tienda:['comercio','comercio','almacen'],
+  hospital:['clinica','clinica','bano','almacen','oficina'],
+  comisaria:['oficina','vestidor','almacen','celda'],
+  ferreteria:['taller','almacen','comercio','oficina'],
+  farmacia:['farm','farm','almacen'],
+  barberia:['comercio','sala','bano'],
+  carcel:['celda','celda','celda','vestidor','oficina'],
+  gasolinera:['comercio','almacen'],
+  escuela:['aula','aula','bano','almacen','oficina'],
+  bar:['bar','bar','cocina_ind','bano','almacen'],
+  bodega:['almacen','almacen','almacen','oficina'],
+  taller_mec:['taller','taller','almacen','oficina'],
+  oficina:['oficina','oficina','sala','bano'],
+  restaurante:['bar','cocina_ind','almacen','bano'],
+  iglesia:['altar','sala','oficina']
+};
+// Rol prioritario garantizado en el primer cuarto de cada tipo.
+const BUILD_PRIMARY={casa:'recamara',hospital:'clinica',carcel:'celda',
+  ferreteria:'taller',farmacia:'farm',bar:'bar',taller_mec:'taller',
+  bodega:'almacen',restaurante:'cocina_ind',escuela:'aula'};
+// Mueble insignia que SIEMPRE aparece si el cuarto tiene su rol (coherencia).
+const ROLE_KEY={recamara:'cama',cocina:'nevera',clinica:'camilla',
+  farm:'botiquin',celda:'cama',taller:'herramienta',cocina_ind:'nevera',
+  almacen:'estante',comercio:'estante',bar:'mesa',bano:'botiquin'};
+
 const EP={x:MW-9,y:9};
 const SPECIALS=[
   {type:'tienda',w:12,h:8,hue:1,name:'ABARROTES',furn:['estante','estante','estante','estante','nevera','mesa']},
@@ -147,7 +195,14 @@ const SPECIALS=[
   {type:'ferreteria',w:9,h:7,hue:1,name:'FERRETERIA',furn:['herramienta','herramienta','estante','estante','alacena','mesa']},
   {type:'farmacia',w:8,h:6,hue:0,name:'FARMACIA',furn:['botiquin','botiquin','vitrina','estante','estante']},
   {type:'barberia',w:7,h:5,hue:2,name:'BARBERIA',furn:['vitrina','mesa','ropero','estante']},
-  {type:'carcel',w:11,h:8,hue:2,name:'CARCEL',furn:['casillero','casillero','cama','cama','mesa','alacena']}
+  {type:'carcel',w:11,h:8,hue:2,name:'CARCEL',furn:['casillero','casillero','cama','cama','mesa','alacena']},
+  {type:'taller_mec',w:10,h:8,hue:2,name:'TALLER',furn:['herramienta','herramienta','estante','mesa','casillero']},
+  {type:'bar',w:9,h:7,hue:1,name:'CANTINA',furn:['mesa','mesa','estante','nevera','alacena']},
+  {type:'bodega',w:13,h:9,hue:1,name:'BODEGA',furn:['estante','estante','estante','estante','mesa']},
+  {type:'escuela',w:13,h:10,hue:0,name:'ESCUELA',furn:['mesa','mesa','estante','estante','casillero','botiquin']},
+  {type:'restaurante',w:10,h:8,hue:1,name:'RESTAURANTE',furn:['mesa','mesa','nevera','alacena','estante']},
+  {type:'oficina',w:9,h:7,hue:2,name:'OFICINAS',furn:['mesa','estante','casillero','ropero']},
+  {type:'iglesia',w:9,h:8,hue:0,name:'IGLESIA',furn:['mesa','mesa','estante','ropero']}
 ];
 function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
   const doorI=bx+Math.floor(bw/2),wide=bw>=10;
@@ -155,7 +210,7 @@ function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
   if(wide)doors.push({i:doorI+1,j:by+bh-1});
   const roofs=['#6b4a3a','#7a4636','#5a4a42','#4a5058','#6a5a3a','#814f3c'];
   const b={x:bx,y:by,w:bw,h:bh,hue,type:btype,name:bname,doors,
-    roofCol:btype?'#4d5259':roofs[irand(0,roofs.length)],_roofA:1};
+    roofCol:bname?'#4d5259':roofs[irand(0,roofs.length)],_roofA:1};
   buildings.push(b);
   for(let j=by;j<by+bh;j++)for(let i=bx;i<bx+bw;i++){
     const edge=(i===bx||i===bx+bw-1||j===by||j===by+bh-1);
@@ -223,6 +278,15 @@ function ensureConnected(b){
         if(acted)break;
       }
     }
+    // 4º: a prueba de todo — libera cualquier vecino sólido interno del primer
+    // tile aislado (mueble o muro), garantiza avance y converge al 100%.
+    if(!acted){
+      const[i,j]=iso[0];
+      for(const[di,dj]of DIRS){const wi=i+di,wj=j+dj;
+        if(inb(wi,wj)&&SOLID[idx(wi,wj)]!==0){
+          if(SOLID[idx(wi,wj)]===4)for(let f=furns.length-1;f>=0;f--)if(furns[f].gx===wi&&furns[f].gy===wj){furns.splice(f,1);break;}
+          SOLID[idx(wi,wj)]=0;acted=true;break;}}
+    }
     if(!acted)break;
   }
 }
@@ -250,24 +314,41 @@ function partitionRoom(x0,y0,x1,y1,depth,rooms,doorTiles,hue){
     partitionRoom(x0,wy+1,x1,y1,depth+1,rooms,doorTiles,hue);
   }
 }
-// Amuebla cada cuarto pegando muebles a sus muros, sin bloquear puertas.
+// Amuebla cada cuarto según su ROL (cocina, recámara, taller…), pegando los
+// muebles a sus muros y sin bloquear puertas. Cada tipo de edificio reparte
+// sus cuartos con roles coherentes (BUILD_ROLES); el primero es el prioritario.
 function furnishRooms(rooms,furnTypes,btype,doorTiles,doors){
   const blocked=new Set(),bk=(i,j)=>i+','+j;
   for(const[i,j]of doorTiles){blocked.add(bk(i,j));
     blocked.add(bk(i+1,j));blocked.add(bk(i-1,j));blocked.add(bk(i,j+1));blocked.add(bk(i,j-1));}
   for(const d of doors){blocked.add(bk(d.i,d.j-1));blocked.add(bk(d.i,d.j-2));}
-  const spots=[];
-  for(const r of rooms)for(let j=r.y0;j<=r.y1;j++)for(let i=r.x0;i<=r.x1;i++){
-    if(SOLID[idx(i,j)]!==0||blocked.has(bk(i,j)))continue;
-    if(SOLID[idx(i-1,j)]===1||SOLID[idx(i+1,j)]===1||SOLID[idx(i,j-1)]===1||SOLID[idx(i,j+1)]===1)
-      spots.push([i,j]);
-  }
-  for(let i=spots.length-1;i>0;i--){const j=irand(0,i+1);const t=spots[i];spots[i]=spots[j];spots[j]=t;}
-  const n=Math.min(spots.length,Math.max(furnTypes.length,Math.floor(spots.length*.42)));
-  for(let k=0;k<n;k++){const[i,j]=spots[k];if(SOLID[idx(i,j)])continue;
-    SOLID[idx(i,j)]=4;
-    furns.push({gx:i,gy:j,type:furnTypes[irand(0,furnTypes.length)],looted:false,rt:0,bt:btype});
-  }
+  // baraja de roles para este edificio (con el prioritario garantizado primero)
+  let roleBag=(BUILD_ROLES[btype]||[]).slice();
+  for(let i=roleBag.length-1;i>0;i--){const j=irand(0,i+1);const t=roleBag[i];roleBag[i]=roleBag[j];roleBag[j]=t;}
+  const prim=BUILD_PRIMARY[btype];
+  if(prim){const p=roleBag.indexOf(prim);
+    if(p>0){roleBag.splice(p,1);roleBag.unshift(prim);}else if(p<0)roleBag.unshift(prim);}
+  // cuartos de arriba-izquierda a abajo-derecha, para una asignación estable
+  const ordered=rooms.slice().sort((a,b)=>(a.y0-b.y0)||(a.x0-b.x0));
+  ordered.forEach((r,ri)=>{
+    const role=roleBag.length?roleBag[ri%roleBag.length]:null;
+    const palette=(role&&ROLE_FURN[role])?ROLE_FURN[role]:furnTypes;
+    r.role=role;
+    const spots=[];
+    for(let j=r.y0;j<=r.y1;j++)for(let i=r.x0;i<=r.x1;i++){
+      if(SOLID[idx(i,j)]!==0||blocked.has(bk(i,j)))continue;
+      if(SOLID[idx(i-1,j)]===1||SOLID[idx(i+1,j)]===1||SOLID[idx(i,j-1)]===1||SOLID[idx(i,j+1)]===1)
+        spots.push([i,j]);
+    }
+    for(let i=spots.length-1;i>0;i--){const j=irand(0,i+1);const t=spots[i];spots[i]=spots[j];spots[j]=t;}
+    const n=Math.min(spots.length,Math.max(1,Math.round(spots.length*.5)));
+    const key=role&&ROLE_KEY[role];                 // mueble insignia del cuarto
+    for(let k=0;k<n;k++){const[i,j]=spots[k];if(SOLID[idx(i,j)])continue;
+      SOLID[idx(i,j)]=4;
+      const type=(k===0&&key)?key:palette[irand(0,palette.length)];
+      furns.push({gx:i,gy:j,type,looted:false,rt:0,bt:btype});
+    }
+  });
 }
 function genWorld(){
   FLOOR=new Uint8Array(MW*MH);SOLID=new Uint8Array(MW*MH);WHUE=new Uint8Array(MW*MH);
@@ -315,20 +396,20 @@ function genWorld(){
     }
     return null;
   }
-  for(const sp of SPECIALS){
+  // los edificios grandes primero: agarran su manzana antes de que el mapa se llene
+  const specOrder=SPECIALS.slice().sort((a,b)=>b.w*b.h-a.w*a.h);
+  for(const sp of specOrder){
     const b=placeUrban(sp.w,sp.h,sp.furn,sp.type,sp.name,sp.hue);
     if(b&&sp.pumps)for(const off of[1,4]){const pi=b.x+off,pj=b.y+sp.h+1;
       if(pj<MH&&!SOLID[idx(pi,pj)]&&FLOOR[idx(pi,pj)]<4){SOLID[idx(pi,pj)]=4;
         furns.push({gx:pi,gy:pj,type:'bomba',looted:false,rt:0,bt:sp.type});}}
     if(!b)console.warn('no cupo',sp.type);
   }
-  // casas (con cama garantizada) repartidas por las manzanas
+  // casas (con recámara/cama garantizada por el rol) repartidas por las manzanas
   for(let n=0;n<8;n++){
     const bw=irand(6,10),bh=irand(5,8);
-    const pool=['cama','nevera','alacena','alacena','ropero','mesa'];
-    const ft=['cama'];const nf=irand(3,6);
-    for(let k=1;k<nf;k++)ft.push(pool[irand(0,pool.length)]);
-    placeUrban(bw,bh,ft,null,null,irand(0,3));
+    const ft=['cama','nevera','alacena','ropero','mesa'];   // respaldo si falta rol
+    placeUrban(bw,bh,ft,'casa',null,irand(0,3));
   }
   // árboles (con vida, lejos del punto de extracción)
   for(let n=0;n<90;n++)for(let t=0;t<40;t++){
@@ -416,7 +497,9 @@ function buildMini(){
     c.fillRect(i*k,j*k,k+.5,k+.5);
   }
   const tint={tienda:'#c9863a',gasolinera:'#c94a3a',hospital:'#d9d9d9',comisaria:'#5a7ac9',
-    ferreteria:'#c9a83a',farmacia:'#4ac97a',barberia:'#c95a9a',carcel:'#8a8a8a'};
+    ferreteria:'#c9a83a',farmacia:'#4ac97a',barberia:'#c95a9a',carcel:'#8a8a8a',
+    taller_mec:'#b0742a',bar:'#c98a4a',bodega:'#7a6a4a',escuela:'#4ab0c9',
+    restaurante:'#c96a4a',oficina:'#6a7a9a',iglesia:'#c9c07a',casa:'#8a7a5a'};
   c.globalAlpha=.5;
   for(const b of buildings)if(b.type){c.fillStyle=tint[b.type]||'#fff';
     c.fillRect(b.x*k,b.y*k,b.w*k,b.h*k);}
@@ -587,7 +670,55 @@ function maybeThemed(bt,kind){
     else return false;
     return true;
   }
-  return false;                                   // otros edificios: botín normal
+  if(bt==='taller_mec'){                          // gasolina, llave, refacciones
+    if(r<.34){player.gas++;msg('⛽ Bidón de gasolina (+1)');}
+    else if(r<.55)giveTool('wrench');
+    else if(r<.72){player.scrap+=2;msg('🔩 Refacciones (+2)');}
+    else if(r<.85){player.wood++;msg('🪵 Tablón (+1)');}
+    else return false;
+    return true;
+  }
+  if(bt==='bar'||bt==='restaurante'){             // alcohol, comida, algún bate
+    if(r<.34){player.alcohol++;msg('🧪 Botella de alcohol (+1)');}
+    else if(r<.6)addInv('food','🍖 Comida de la cocina');
+    else if(r<.74)addInv('water','💧 Bebida');
+    else if(r<.84&&player.wTier<2){equipWeapon(2);msg('🏏 Un bate tras la barra → arma');}
+    else return false;
+    return true;
+  }
+  if(bt==='bodega'){                              // comida y agua en volumen
+    if(r<.45)addInv('food','🍖 Provisiones en caja');
+    else if(r<.78)addInv('water','💧 Agua embotellada');
+    else if(r<.9){player.wood+=2;msg('🪵 Tarima de madera (+2)');}
+    else return false;
+    return true;
+  }
+  if(bt==='escuela'){                             // libros (XP), vendas, algo de comida
+    if(Math.random()<.3){const sk=['carp','mech','elec','med','str'];giveBook(sk[irand(0,sk.length)]);return true;}
+    if(r<.3)addInv('med','🩹 Botiquín de enfermería');
+    else if(r<.5)addInv('food','🍖 Comida de cafetería');
+    else if(r<.7)addInv('water','💧 Agua');
+    else if(r<.82){player.scrap++;msg('🔩 Chatarra del taller (+1)');}
+    else return false;
+    return true;
+  }
+  if(bt==='oficina'){                             // chatarra, algo de comida, rara arma
+    if(maybeRadio(.14))return true;
+    if(r<.32){player.scrap+=2;msg('🔩 Electrónicos (+2 chatarra)');}
+    else if(r<.5)addInv('food','🍖 Almuerzo olvidado');
+    else if(r<.64)addInv('water','💧 Agua');
+    else if(r<.72)giveGunOrAmmo();
+    else return false;
+    return true;
+  }
+  if(bt==='iglesia'){                             // velas/tela, algo de comida
+    if(r<.4){player.cloth++;msg('🧵 Manteles (+1 tela)');}
+    else if(r<.6)addInv('food','🍖 Despensa de caridad');
+    else if(r<.72)addInv('med','🩹 Vendas');
+    else return false;
+    return true;
+  }
+  return false;                                   // otros edificios (casa): botín normal
 }
 function rollLoot(kind){
   if(maybeBook(kind))return;
