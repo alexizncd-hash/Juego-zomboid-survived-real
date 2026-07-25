@@ -136,6 +136,29 @@ h1 em{font-style:normal;color:#a31621}
 .rbtn:active{transform:scale(.95)}
 .rbtn:disabled{opacity:.35;cursor:default}
 
+/* partida en la nube */
+#cloudBox{text-align:left;border-top:1px dashed #39442e;margin-top:14px;padding-top:4px}
+.cnote{font-size:11px;color:#6f7c5c;line-height:1.6;margin-bottom:8px}
+.cnote b{color:#9aa885}
+#cloudCode{font-size:13px;letter-spacing:1.5px;color:#d9c26a;background:#151a10;
+  border:1px solid #2c3324;border-radius:3px;padding:7px 9px;text-align:center;
+  word-break:break-all;cursor:pointer;user-select:all;-webkit-user-select:all}
+.crow{display:flex;gap:6px;margin-top:8px}
+.sbtn{flex:1;font-family:inherit;background:#39442e;border:1px solid #4d5c3e;color:#d9c26a;
+  padding:9px 4px;border-radius:3px;font-size:11px;cursor:pointer}
+.sbtn:active{transform:scale(.96)}
+.sbtn:disabled{opacity:.4;cursor:default}
+#cloudIn{width:100%;margin-top:7px;font-family:inherit;font-size:11.5px;color:#c8d3b0;
+  background:#151a10;border:1px solid #2c3324;border-radius:3px;padding:8px 9px}
+#cloudIn::placeholder{color:#5c6650}
+#cloudMsg{font-size:11px;color:#9aa885;margin-top:7px;min-height:14px;line-height:1.5}
+#cloudMsg.bad{color:#ff6b5e}
+#cloudMsg.ok{color:#7dd97d}
+#cloudTop{font-size:11px;color:#9aa885;margin-top:8px;max-height:150px;overflow-y:auto}
+#cloudTop .tr{display:flex;justify-content:space-between;gap:8px;
+  border-bottom:1px solid #1e2418;padding:3px 2px}
+#cloudTop .tr b{color:#d9c26a}
+
 /* panel de inventario */
 #inv{display:none;z-index:11}
 .isec{margin-top:12px;color:#d9c26a;font-size:12.5px;letter-spacing:1px;

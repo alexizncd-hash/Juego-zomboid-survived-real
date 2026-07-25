@@ -1253,12 +1253,97 @@ function loadGame(){
   }catch(e){return false;}
 }
 function manualSave(){
-  if(saveGame())msg('💾 Partida guardada');
+  if(saveGame()){msg('💾 Partida guardada');cloudPush(true);}
   else msg('No se pudo guardar',true);
 }
 try{addEventListener('beforeunload',()=>{if(started&&!dead)saveGame();});}catch(e){}
 
+/* ================= NUBE (Supabase) =================
+   El guardado local sigue mandando: la nube es una COPIA. Si no hay red, o
+   Supabase no responde, el juego funciona exactamente igual que antes.
+   No hay login: tu partida va atada a un CÓDIGO secreto que se genera solo
+   y que puedes escribir en otro teléfono para recuperarla. En el servidor
+   solo se guarda el hash de ese código, nunca el código en claro. */
+const CLOUD={
+  url:'https://fonurjyhtxoccqyfhzda.supabase.co',
+  key:'sb_publishable_xmV__n15r7eOTv0NL3MtEQ_a-or8SRd',
+  tokenKey:'zonaCero.cloudToken',
+  nameKey:'zonaCero.name'
+};
+let cloudBusy=false,cloudLast=0,cloudT=0;
+function cloudToken(create){
+  let t=null;
+  try{t=localStorage.getItem(CLOUD.tokenKey);}catch(e){}
+  if(!t&&create){
+    const b=new Uint8Array(16);
+    (self.crypto||{}).getRandomValues?crypto.getRandomValues(b):b.forEach((_,i)=>b[i]=irand(0,256));
+    t=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    try{localStorage.setItem(CLOUD.tokenKey,t);}catch(e){}
+  }
+  return t;
+}
+function cloudName(){
+  try{return localStorage.getItem(CLOUD.nameKey)||'Superviviente';}catch(e){return'Superviviente';}
+}
+// Código bonito de 4 grupos para que se pueda teclear en otro dispositivo.
+function prettyCode(t){return t?t.toUpperCase().match(/.{1,8}/g).join('-'):'';}
+function parseCode(s){const c=(s||'').replace(/[^0-9a-fA-F]/g,'').toLowerCase();
+  return c.length===32?c:null;}
+async function rpc(fn,args){
+  const r=await fetch(CLOUD.url+'/rest/v1/rpc/'+fn,{
+    method:'POST',
+    headers:{'Content-Type':'application/json',apikey:CLOUD.key,
+      Authorization:'Bearer '+CLOUD.key},
+    body:JSON.stringify(args)});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const txt=await r.text();
+  return txt?JSON.parse(txt):null;
+}
+// Sube la partida local. `loud` avisa por pantalla; el autoguardado va callado.
+async function cloudPush(loud){
+  if(cloudBusy)return false;
+  let raw=null;try{raw=localStorage.getItem(SAVE_KEY);}catch(e){}
+  if(!raw){if(loud)msg('No hay partida que subir',true);return false;}
+  cloudBusy=true;
+  try{
+    await rpc('zc_save_put',{p_token:cloudToken(true),p_data:JSON.parse(raw),
+      p_day:dayNum(),p_kills:kills|0});
+    cloudLast=Date.now();
+    if(loud)msg('☁️ Partida respaldada en la nube');
+    return true;
+  }catch(e){
+    if(loud)msg('☁️ Sin conexión — se guardó solo en este aparato',true);
+    return false;
+  }finally{cloudBusy=false;}
+}
+// Baja la partida de un código y la deja lista para "CONTINUAR".
+async function cloudPull(code){
+  const t=code?parseCode(code):cloudToken(false);
+  if(!t){msg('Ese código no es válido',true);return false;}
+  cloudBusy=true;
+  try{
+    const rows=await rpc('zc_save_get',{p_token:t});
+    if(!rows||!rows.length){msg('No hay ninguna partida con ese código',true);return false;}
+    const s=rows[0].data;
+    if(!s||s.v!==SAVE_VER){msg('Esa partida es de una versión distinta',true);return false;}
+    localStorage.setItem(SAVE_KEY,JSON.stringify(s));
+    if(code)localStorage.setItem(CLOUD.tokenKey,t);   // adoptas ese código
+    msg('☁️ Partida recuperada — pulsa CONTINUAR');
+    refreshStartUI();
+    return true;
+  }catch(e){msg('☁️ No se pudo conectar',true);return false;}
+  finally{cloudBusy=false;}
+}
+async function cloudRecord(won){
+  try{await rpc('zc_record_add',{p_token:cloudToken(true),p_name:cloudName(),
+    p_days:dayNum(),p_kills:kills|0,p_won:!!won});}catch(e){}
+}
+async function cloudTop(){
+  try{return await rpc('zc_record_top',{p_limit:20});}catch(e){return null;}
+}
+
 function die(cause){
+  cloudRecord(false);                              // deja tu marca antes de borrar
   clearSave();                                     // la partida terminó
   dead=true;
   const mins=Math.floor(gameTime/60),secs=Math.floor(gameTime%60);
@@ -1279,6 +1364,7 @@ function update(dt){
   helmetTick(dt);                                   // la lámpara del casco gasta pilas
   updateWeather(dt);updateAmbient(dt);
   saveT-=dt;if(saveT<=0){saveT=25;saveGame();}      // autoguardado silencioso
+  cloudT-=dt;if(cloudT<=0){cloudT=90;cloudPush(false);}   // respaldo callado a la nube
   if(night&&!prevNight&&day>=2)horde();
   prevNight=night;
   if(day>=CFG.radioAutoDay&&!radioFound){radioFound=true;
@@ -2901,6 +2987,7 @@ function sleepTick(dt){
     msg('El hambre te despertó…',true);}
 }
 function win(){
+  cloudRecord(true);                               // marca de victoria al marcador
   clearSave();                                     // la partida terminó
   won=true;dead=true;
   const mins=Math.floor(gameTime/60);
@@ -3476,15 +3563,63 @@ buildTiles();
   const el=$('recLine');el.style.display='block';
   el.innerHTML=recLine(r)+' · '+r.runs+' intento(s)';
 })();
+// El botón CONTINUAR se recalcula cada vez que cambia el guardado local
+// (por ejemplo al recuperar una partida de la nube).
+function refreshStartUI(){
+  const bc=$('btnContinue');
+  if(bc)bc.style.display=hasSave()?'inline-block':'none';
+  const cc=$('cloudCode');
+  if(cc){const t=cloudToken(false);cc.textContent=t?prettyCode(t):'— (aún sin partida)';}
+}
 (function showContinue(){
-  if(!hasSave())return;
-  const bc=$('btnContinue');bc.style.display='inline-block';
+  const bc=$('btnContinue');
   bc.addEventListener('click',()=>{
     if(loadGame()){document.getElementById('start').style.display='none';
       sfx(300,.15,'triangle',.05);msg('▶ Partida cargada');}
     else msg('El guardado está dañado o es de otra versión',true);
   });
+  refreshStartUI();
 })();
+/* ── Interfaz de la nube ── */
+(function cloudUI(){
+  const box=$('cloudBox'),code=$('cloudCode'),info=$('cloudMsg'),top=$('cloudTop');
+  if(!box)return;
+  const say=(t,cls)=>{info.textContent=t;info.className=cls||'';};
+  const busy=b=>box.querySelectorAll('.sbtn').forEach(x=>x.disabled=b);
+  code.addEventListener('click',()=>{
+    const t=cloudToken(false);if(!t)return;
+    try{navigator.clipboard.writeText(prettyCode(t));say('Código copiado','ok');}
+    catch(e){say('Selecciónalo y cópialo a mano');}
+  });
+  $('btnCloudUp').addEventListener('click',async()=>{
+    if(!hasSave()){say('Primero juega una partida','bad');return;}
+    busy(true);say('Subiendo…');
+    const ok=await cloudPush(false);
+    busy(false);refreshStartUI();
+    say(ok?'Respaldada. Apunta tu código.':'No se pudo conectar',ok?'ok':'bad');
+  });
+  $('btnCloudDown').addEventListener('click',async()=>{
+    const raw=$('cloudIn').value.trim();
+    if(raw&&!parseCode(raw)){say('Ese código no tiene la forma correcta','bad');return;}
+    busy(true);say('Buscando…');
+    const ok=await cloudPull(raw||null);
+    busy(false);refreshStartUI();
+    say(ok?'¡Partida recuperada! Pulsa CONTINUAR.':'No se encontró esa partida',ok?'ok':'bad');
+  });
+  $('btnCloudTop').addEventListener('click',async()=>{
+    busy(true);say('Cargando marcador…');
+    const rows=await cloudTop();
+    busy(false);
+    if(!rows){say('No se pudo conectar','bad');return;}
+    if(!rows.length){say('Aún no hay marcas. Sé el primero.');return;}
+    say('');
+    top.innerHTML=rows.map((r,i)=>
+      '<div class="tr"><span>'+(i+1)+'. '+escapeHtml(r.name)+(r.won?' 🚁':'')+
+      '</span><b>día '+r.days+' · '+r.kills+' 🧟</b></div>').join('');
+  });
+})();
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 document.getElementById('btnStart').addEventListener('click',()=>{
   init();started=true;
   document.getElementById('start').style.display='none';

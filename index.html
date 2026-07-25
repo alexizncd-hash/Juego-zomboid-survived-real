@@ -96,6 +96,20 @@
     <div class="tag" id="recLine" style="display:none"></div>
     <button class="bigbtn" id="btnContinue" style="display:none">▶ CONTINUAR PARTIDA</button>
     <button class="bigbtn" id="btnStart">NUEVA PARTIDA</button>
+    <div id="cloudBox">
+      <div class="chead" style="margin-top:16px"><span>☁️ PARTIDA EN LA NUBE</span></div>
+      <div class="cnote">Tu partida se respalda sola. Para jugarla en otro aparato,
+        apunta este <b>código</b> y escríbelo allí.</div>
+      <div id="cloudCode" title="Tu código secreto">—</div>
+      <div class="crow">
+        <button class="sbtn" id="btnCloudUp">⬆️ Respaldar</button>
+        <button class="sbtn" id="btnCloudDown">⬇️ Recuperar</button>
+        <button class="sbtn" id="btnCloudTop">🏆 Marcador</button>
+      </div>
+      <input id="cloudIn" placeholder="Pega aquí un código para recuperarlo" autocomplete="off">
+      <div id="cloudMsg"></div>
+      <div id="cloudTop"></div>
+    </div>
   </div>
 </div>
 
