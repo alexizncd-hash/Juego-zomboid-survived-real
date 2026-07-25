@@ -99,7 +99,10 @@ const CFG={
   coldRate:3.2, warmRate:7, tempNeutral:50,
   panicRise:14, panicFall:9,
   boredRise:.35, boredFall:16,
-  carryBase:26             // peso que aguantas sin ir sobrecargado
+  carryBase:26,            // peso que aguantas sin ir sobrecargado
+  // comida y agua
+  spoilTime:260,           // segundos hasta que la carne cruda se pudre
+  rainRate:.55, barrelMax:12   // llenado del barril y su capacidad
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -570,7 +573,7 @@ function init(){
     xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
     tools:{hammer:false,saw:false,screw:false,wrench:false,crow:false},
     pack:false,helmet:false,helmOn:false,batt:0,battT:0,carKeys:0,
-    temp:50,panic:0,bored:0,
+    temp:50,panic:0,bored:0,rawAge:0,dirtyWater:0,
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;skillsOpen=false;invOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
@@ -701,7 +704,7 @@ function indoors(){
   const i=Math.floor(player.gx),j=Math.floor(player.gy);
   return i>=0&&j>=0&&i<MW&&j<MH&&FLOOR[idx(i,j)]===6;
 }
-function nearFire(){
+function nearWarmth(){
   for(const f of fires)if(hyp(f.gx-player.gx,f.gy-player.gy)<3.2)return true;
   return false;
 }
@@ -713,7 +716,7 @@ function bodyTick(dt,night,close){
   if(raining())target-=14;
   if(indoors())target+=14;                         // bajo techo se aguanta
   if(inCar)target+=8;
-  if(nearFire())target+=34;
+  if(nearWarmth())target+=34;
   if(!night&&!raining())target+=6;
   const rate=(target>p.temp)?CFG.warmRate:CFG.coldRate;
   p.temp=clamp(p.temp+Math.sign(target-p.temp)*Math.min(rate*dt,Math.abs(target-p.temp)),0,100);
@@ -721,7 +724,7 @@ function bodyTick(dt,night,close){
   if(p.temp>92)p.water=Math.max(0,p.water-.5*dt);   // golpe de calor: deshidrata
 
   // PÁNICO: sube con zombis encima y en la oscuridad; baja a salvo.
-  let pt=close*22+(night&&!helmetOn()&&!nearFire()?14:0)+(p.hp<35?18:0);
+  let pt=close*22+(night&&!helmetOn()&&!nearWarmth()?14:0)+(p.hp<35?18:0);
   if(indoors()&&close===0)pt-=10;
   pt=clamp(pt,0,100);
   const pr=(pt>p.panic)?CFG.panicRise:CFG.panicFall;
@@ -734,6 +737,46 @@ function bodyTick(dt,night,close){
 const cold=()=>player.temp<25, hot=()=>player.temp>80;
 const panicky=()=>player.panic>55, boredOut=()=>player.bored>70;
 
+/* ── Comida perecedera y agua ──
+   La carne cruda se echa a perder. Un refrigerador la conserva… mientras
+   haya luz en la red, así que el apagón del día 3 también te pudre la
+   despensa. El agua de lluvia se recoge en un barril y hay que HERVIRLA. */
+function nearFridge(){
+  for(const f of furns)if(!f.gone&&f.type==='nevera'&&
+    hyp(f.gx+.5-player.gx,f.gy+.5-player.gy)<1.8)return true;
+  return false;
+}
+const rotten=()=>player.rawAge>=CFG.spoilTime;
+function foodTick(dt){
+  if(player.rawFood<=0){player.rawAge=0;return;}
+  if(power&&nearFridge())return;                   // la nevera lo detiene (con luz)
+  const before=rotten();
+  player.rawAge=Math.min(CFG.spoilTime*2,player.rawAge+dt);
+  if(!before&&rotten())msg('🤢 La carne cruda se echó a perder',true);
+}
+// Barril recolector: junta agua de lluvia (sucia, hay que hervirla).
+function rainTick(dt){
+  if(!raining())return;
+  for(const p of props)if(p.type==='barril'){
+    p.fill=Math.min(CFG.barrelMax,(p.fill||0)+CFG.rainRate*dt);
+  }
+}
+function tryBarrel(){
+  let best=null,bd=1.6;
+  for(const p of props)if(p.type==='barril'){
+    const d=hyp(p.gx+.5-player.gx,p.gy+.5-player.gy);
+    if(d<bd){bd=d;best=p;}}
+  if(!best)return false;
+  const got=Math.floor(best.fill||0);
+  if(got<=0){msg('El barril está vacío — espera a que llueva 🌧️');return true;}
+  const room=invCap()-player.dirtyWater;
+  const take=Math.min(got,room);
+  if(take<=0){msg('No puedes cargar más agua sucia');return true;}
+  best.fill-=take;player.dirtyWater+=take;
+  msg('🪣 Recogiste '+take+' de agua sucia — HIÉRVELA en una fogata');
+  sfx(360,.12,'sine',.04);
+  return true;
+}
 /* ── Utilidades del pueblo ──
    Nadie mantiene ya la central ni la potabilizadora: la luz se va el día
    powerDay y el agua el waterDay. Desde ahí, la luz solo la dan tus
@@ -1118,6 +1161,8 @@ function loadGame(){
     if(player.temp===undefined)player.temp=CFG.tempNeutral;   // estados de v5
     if(player.panic===undefined)player.panic=0;
     if(player.bored===undefined)player.bored=0;
+    if(player.rawAge===undefined)player.rawAge=0;
+    if(player.dirtyWater===undefined)player.dirtyWater=0;
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -1298,6 +1343,7 @@ function update(dt){
     for(const p of props)if(p.type==='dumpster'&&p.looted){p.rt-=dt;if(p.rt<=0)p.looted=false;}
   }
   utilitiesTick(day);
+  foodTick(dt);rainTick(dt);
 
   for(const p of parts){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.life-=dt;}
   parts=parts.filter(p=>p.life>0);
@@ -1335,6 +1381,8 @@ function updateHUD(day,night){
   if(player.pack)ts+='🎒';
   if(player.batt>0)ts+='🔋'+player.batt;
   if(player.carKeys>0)ts+='🔑'+player.carKeys;
+  if(player.dirtyWater>0)ts+='🪣'+player.dirtyWater;
+  if(rotten())ts+='🤢';
   if(!power)ts+=' 💡❌';                                  // servicios caídos
   if(!water)ts+=' 🚱';
   DOM.rTools.textContent=ts;
@@ -2410,7 +2458,7 @@ addEventListener('keydown',e=>{
   if(k==='i'&&started&&!dead&&!paused){toggleInv();return;}
   if(!player||paused||crafting||skillsOpen||invOpen||!started)return;
   if(k===' ')atkHold=true;
-  if(k==='e'){if(!tryGate()&&!tryTap())tryLoot();}
+  if(k==='e'){if(!tryGate()&&!tryBarrel()&&!tryTap())tryLoot();}
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
   if(k==='1')useItem('food');
   if(k==='2')useItem('water');
@@ -2463,7 +2511,7 @@ function bindTap(id,fn){
   el.addEventListener('touchstart',e=>{e.preventDefault();e.stopPropagation();fn();},{passive:false});
   el.addEventListener('mousedown',e=>{e.preventDefault();fn();});
 }
-bindTap('btnLoot',()=>{if(!tryGate()&&!tryTap())tryLoot();});
+bindTap('btnLoot',()=>{if(!tryGate()&&!tryBarrel()&&!tryTap())tryLoot();});
 bindTap('btnCraft',toggleCraft);
 bindTap('btnGun',()=>{if(player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}});
 bindTap('btnCar',enterExitCar);
@@ -2790,6 +2838,19 @@ function drawProp(p,sx,sy,night){
     ctx.beginPath();ctx.moveTo(a,b-11);ctx.lineTo(cc,dd-11);ctx.stroke();
     return;
   }
+  if(p.type==='barril'){
+    groundShadow(p.gx,p.gy,13,6);
+    boxIso(p.gx+.24,p.gy+.24,p.gx+.76,p.gy+.76,0,24,['#4a5f4a','#3a4c3a','#5c7159']);
+    const lv=(p.fill||0)/CFG.barrelMax;
+    const[tx,ty]=[g2sx(p.gx+.5,p.gy+.5),g2sy(p.gx+.5,p.gy+.5)-24];
+    ctx.fillStyle='#2a3a2a';ctx.beginPath();ctx.ellipse(tx,ty,13,6.5,0,0,7);ctx.fill();
+    if(lv>0){ctx.fillStyle='rgba(110,165,195,.85)';   // agua dentro
+      ctx.beginPath();ctx.ellipse(tx,ty,13*(.35+lv*.65),6.5*(.35+lv*.65),0,0,7);ctx.fill();}
+    ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.4;  // aros del barril
+    for(let k=1;k<=2;k++){const yy=ty+k*7;
+      ctx.beginPath();ctx.ellipse(tx,yy,13,6.5,0,.15,Math.PI-.15);ctx.stroke();}
+    return;
+  }
   // dumpster
   groundShadow(p.gx,p.gy,17,8);
   const c=p.looted?['#2f4a3a','#243a2d','#3a5847']:['#3f6b4e','#31543d','#4d825f'];
@@ -2938,7 +2999,8 @@ function renderInv(){
   h+='</div><div class="isec">MATERIALES</div><div class="igrid">';
   const mats=[['wood','🪵','Madera'],['scrap','🔩','Chatarra'],['cloth','🧵','Tela'],
     ['alcohol','🧪','Alcohol'],['rawFood','🥩','Carne cruda'],['gas','⛽','Gasolina'],
-    ['ammo','🔸','Balas'],['batt','🔋','Pilas'],['carKeys','🔑','Llaves']];
+    ['ammo','🔸','Balas'],['batt','🔋','Pilas'],['carKeys','🔑','Llaves'],
+    ['dirtyWater','🪣','Agua sucia']];
   for(const[k,ic,n]of mats){
     const q=player[k]||0;
     h+='<div class="icell'+(q?'':' off')+'"><div class="ig">'+ic+'</div>'+
@@ -3004,6 +3066,8 @@ const RECIPES=[
     cost:{wood:4,cloth:2},req:{carp:1},tool:'hammer',make:()=>placeBed()},
   {id:'fogata',ic:'🔥',n:'Fogata',d:'Cocina carne cruda y da luz de noche',
     cost:{wood:2,scrap:1},make:()=>placeFire()},
+  {id:'barril',ic:'🪣',n:'Barril de lluvia',d:'Recoge agua cuando llueve · hiérvela en la fogata',
+    cost:{wood:2,scrap:2},req:{carp:1},make:()=>placeBarrel()},
   {id:'generador',ic:'💡',n:'Generador',d:'Da luz de noche sin fuego, en un área amplia',
     cost:{scrap:4,wood:2},req:{elec:2},tool:'screw',make:()=>placeGen()},
   {id:'reparauto',ic:'🚗',n:'Reparar auto',d:'Repara el auto que tengas al lado',
@@ -3049,6 +3113,15 @@ function placeFire(){
   sfx(120,.35,'sawtooth',.05,55);
   return true;
 }
+function placeBarrel(){
+  const t=freeTileAhead();
+  if(!t){msg('No hay espacio libre enfrente',true);return false;}
+  SOLID[idx(t.ti,t.tj)]=4;
+  props.push({gx:t.ti,gy:t.tj,type:'barril',fill:0});
+  buildStatics();gainXP('carp',12);
+  msg('🪣 Barril puesto — se llenará cuando llueva');sfx(240,.14,'square',.05);
+  return true;
+}
 function placeGen(){
   const t=freeTileAhead();
   if(!t){msg('No hay espacio libre enfrente',true);return false;}
@@ -3070,10 +3143,25 @@ function nearFire(){
 function tryCook(){
   if(inCar||player.sleeping||dead||crafting)return;
   if(!nearFire()){msg('Necesitas estar junto a una fogata 🔥');return;}
-  if(player.rawFood<=0){msg('No tienes carne cruda 🥩');return;}
+  // Hervir el agua de lluvia la vuelve potable: es la vía tras el corte.
+  if(player.dirtyWater>0){
+    let boiled=0;
+    while(player.dirtyWater>0&&player.inv.water<invCap()){
+      player.dirtyWater--;player.inv.water++;boiled++;}
+    if(boiled>0){msg('💧 Herviste '+boiled+' de agua — ya es potable');
+      gainXP('med',6);sfx(420,.16,'sine',.05);vib(12);return;}
+    msg('No puedes cargar más agua potable');return;
+  }
+  if(player.rawFood<=0){msg('No tienes carne cruda 🥩 ni agua sucia 🪣');return;}
+  const bad=rotten();
   let cooked=0;
-  while(player.rawFood>0&&player.inv.food<6){player.rawFood--;player.inv.food++;cooked++;}
-  if(cooked>0){msg('🍳 Cocinaste '+cooked+' → 🍖 (ranura 1)');gainXP('med',8);
+  while(player.rawFood>0&&player.inv.food<invCap()){player.rawFood--;player.inv.food++;cooked++;}
+  if(cooked>0){
+    player.rawAge=0;
+    if(bad){msg('🍳 Cocinaste '+cooked+', pero estaba pasada… sabe fatal',true);
+      player.hp=clamp(player.hp-6,1,100);}
+    else msg('🍳 Cocinaste '+cooked+' → 🍖 (ranura 1)');
+    gainXP('med',8);
     sfx(300,.14,'triangle',.05);sfx(380,.1,'triangle',.04);vib(15);}
   else msg('Tu inventario de comida está lleno');
 }
