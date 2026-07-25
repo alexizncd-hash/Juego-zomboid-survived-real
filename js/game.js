@@ -26,7 +26,8 @@ const DOM={
   slotN:{},moodle:{}
 };
 for(const k of ['food','water','med','anti'])DOM.slotN[k]=DOM.slots[k].querySelector('.n');
-for(const id of ['mHun','mThi','mTir','mHer','mInf','mPan','mSue'])DOM.moodle[id]=$(id);
+for(const id of ['mHun','mThi','mTir','mHer','mInf','mPan','mSue',
+  'mFri','mCal','mAbu','mPes'])DOM.moodle[id]=$(id);
 
 let VW,VH,DPR=1;
 // Retina/alta densidad: canvas físico a DPR (tope 2 por rendimiento),
@@ -93,7 +94,12 @@ const CFG={
   // utilidades del pueblo: se cortan solas conforme todo se degrada
   powerDay:3,              // día en que se va la luz de la red
   waterDay:5,              // día en que se corta el agua
-  respawnDay:4             // desde este día el botín YA NO reaparece
+  respawnDay:4,            // desde este día el botín YA NO reaparece
+  // estado del cuerpo: temperatura, pánico, aburrimiento y carga
+  coldRate:3.2, warmRate:7, tempNeutral:50,
+  panicRise:14, panicFall:9,
+  boredRise:.35, boredFall:16,
+  carryBase:26             // peso que aguantas sin ir sobrecargado
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -564,6 +570,7 @@ function init(){
     xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
     tools:{hammer:false,saw:false,screw:false,wrench:false,crow:false},
     pack:false,helmet:false,helmOn:false,batt:0,battT:0,carKeys:0,
+    temp:50,panic:0,bored:0,
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;skillsOpen=false;invOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
@@ -678,6 +685,55 @@ function helmetTick(dt){
     else msg('🔋 Pila gastada — quedan '+player.batt);
   }
 }
+/* ── Estado del cuerpo: temperatura, pánico, aburrimiento y carga ──
+   Cada uno tiene un efecto REAL sobre cómo juegas, no es solo un icono. */
+// Peso que llevas encima; la mochila sube cuánto aguantas sin penalización.
+function carryWeight(){
+  const p=player;
+  return (p.inv.food+p.inv.water)*1.2+(p.inv.med+p.inv.anti)*.4
+    +p.wood*1.1+p.scrap*.9+p.cloth*.5+p.alcohol*.7+p.gas*2.2+p.rawFood*.9
+    +p.ammo*.06+p.batt*.3+(p.wTier?2.5:0)+(p.armor>0?4:0);
+}
+function carryMax(){return CFG.carryBase*(player.pack?1.9:1);}
+function overloaded(){return carryWeight()>carryMax();}
+// ¿Estás bajo techo? Da abrigo y calma un poco.
+function indoors(){
+  const i=Math.floor(player.gx),j=Math.floor(player.gy);
+  return i>=0&&j>=0&&i<MW&&j<MH&&FLOOR[idx(i,j)]===6;
+}
+function nearFire(){
+  for(const f of fires)if(hyp(f.gx-player.gx,f.gy-player.gy)<3.2)return true;
+  return false;
+}
+function bodyTick(dt,night,close){
+  const p=player;
+  // TEMPERATURA: la noche y la lluvia enfrían; el fuego y el techo abrigan.
+  let target=CFG.tempNeutral;
+  if(night)target-=30;                             // a la intemperie, la noche cala
+  if(raining())target-=14;
+  if(indoors())target+=14;                         // bajo techo se aguanta
+  if(inCar)target+=8;
+  if(nearFire())target+=34;
+  if(!night&&!raining())target+=6;
+  const rate=(target>p.temp)?CFG.warmRate:CFG.coldRate;
+  p.temp=clamp(p.temp+Math.sign(target-p.temp)*Math.min(rate*dt,Math.abs(target-p.temp)),0,100);
+  if(p.temp<12)p.hp-=1.1*dt;                       // hipotermia
+  if(p.temp>92)p.water=Math.max(0,p.water-.5*dt);   // golpe de calor: deshidrata
+
+  // PÁNICO: sube con zombis encima y en la oscuridad; baja a salvo.
+  let pt=close*22+(night&&!helmetOn()&&!nearFire()?14:0)+(p.hp<35?18:0);
+  if(indoors()&&close===0)pt-=10;
+  pt=clamp(pt,0,100);
+  const pr=(pt>p.panic)?CFG.panicRise:CFG.panicFall;
+  p.panic=clamp(p.panic+Math.sign(pt-p.panic)*Math.min(pr*dt,Math.abs(pt-p.panic)),0,100);
+
+  // ABURRIMIENTO: sube solo; leer, conducir o pelear lo bajan.
+  if(close>0||inCar)p.bored=Math.max(0,p.bored-CFG.boredFall*dt);
+  else p.bored=Math.min(100,p.bored+CFG.boredRise*dt);
+}
+const cold=()=>player.temp<25, hot=()=>player.temp>80;
+const panicky=()=>player.panic>55, boredOut=()=>player.bored>70;
+
 /* ── Utilidades del pueblo ──
    Nadie mantiene ya la central ni la potabilizadora: la luz se va el día
    powerDay y el agua el waterDay. Desde ahí, la luz solo la dan tus
@@ -953,7 +1009,7 @@ function attack(){
   if(player.useGun&&player.hasGun){shoot();return;}
   const w=MELEE[player.wTier];
   if(TOUCH)autoAim(w.range+2.2);
-  player.cd=w.cd;player.swing=.18;
+  player.cd=w.cd*(panicky()?1.2:1);player.swing=.18;   // con pánico golpeas peor
   const weak=player.sta<6;if(!weak)player.sta-=6;
   let hit=false;
   for(const z of zombies){
@@ -985,7 +1041,8 @@ function shoot(){
     player.cd=.3;return;}
   player.ammo--;player.cd=GUN.cd;player.gunFlash=.07;
   if(TOUCH)autoAim(GUN.range);
-  const a=player.dir+rand(-.03,.03),cx=Math.cos(a),sy=Math.sin(a);
+  const spread=.03+(player.panic/100)*.13;          // el pánico desvía el tiro
+  const a=player.dir+rand(-spread,spread),cx=Math.cos(a),sy=Math.sin(a);
   let bestT=GUN.range,hitZ=null;
   for(const z of zombies){
     const rx=z.gx-player.gx,ry=z.gy-player.gy,t=rx*cx+ry*sy;
@@ -1058,6 +1115,9 @@ function loadGame(){
     if(player.batt===undefined)player.batt=0;
     if(player.battT===undefined)player.battT=0;
     if(player.carKeys===undefined)player.carKeys=0;
+    if(player.temp===undefined)player.temp=CFG.tempNeutral;   // estados de v5
+    if(player.panic===undefined)player.panic=0;
+    if(player.bored===undefined)player.bored=0;
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -1111,13 +1171,16 @@ function update(dt){
     else winT=0;
   }
 
+  let closeZ=0;for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<3.5)closeZ++;
+  bodyTick(dt,night,closeZ);
   player.food=Math.max(0,player.food-CFG.foodDrain*dt);
-  player.water=Math.max(0,player.water-CFG.waterDrain*dt);
+  player.water=Math.max(0,player.water-CFG.waterDrain*(hot()?1.5:1)*dt);
   if(player.food<=0)player.hp-=CFG.starveDmg*dt;
   if(player.water<=0)player.hp-=CFG.thirstDmg*dt;
   if(player.infected)player.hp-=CFG.infectDmg*dt;
   if(player.hp<=0&&!dead){
-    die(player.infected?'La infección':player.water<=0?'La sed':'El hambre');return;}
+    die(player.infected?'La infección':player.water<=0?'La sed':
+      player.temp<12?'El frío':'El hambre');return;}
 
   if(inCar){driveCar(dt);}
   else{
@@ -1131,10 +1194,14 @@ function update(dt){
   const il=hyp(ix,iy);
   const wantRun=(keys['shift']||(joy&&joy.m>.84))&&il>0;
   let maxSp=CFG.walkSpeed;
-  if(wantRun&&player.sta>0){maxSp=CFG.runSpeed;player.sta=Math.max(0,player.sta-CFG.staRun*dt);}
-  else player.sta=clamp(player.sta+CFG.staRegen*dt,0,100);
+  const over=overloaded();
+  if(wantRun&&player.sta>0){maxSp=CFG.runSpeed;
+    player.sta=Math.max(0,player.sta-CFG.staRun*(over?1.6:1)*dt);}
+  else player.sta=clamp(player.sta+CFG.staRegen*(cold()?.5:1)*dt,0,100);
   if(player.hp<35)maxSp*=CFG.hurtSlow;
   if(player.slp<25)maxSp*=CFG.sleepySlow;
+  if(cold())maxSp*=.85;                              // aterido: te mueves peor
+  if(over)maxSp*=.8;                                 // cargado hasta arriba
   let gv={x:0,y:0};
   if(il>0){
     const g=scr2grid(ix,iy),gl=hyp(g.x,g.y)||1;
@@ -1304,14 +1371,17 @@ function updateHUD(day,night){
     DOM.slotN[k].textContent=player.inv[k];
     DOM.slots[k].classList.toggle('empty',player.inv[k]<=0);}
   // moodles
-  let close=0;for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<3)close++;
   setMoodle('mHun',player.food<25,player.food<=0);
   setMoodle('mThi',player.water<25,player.water<=0);
   setMoodle('mTir',player.sta<15,player.sta<=1);
   setMoodle('mHer',player.hp<40,player.hp<20);
   setMoodle('mInf',player.infected,player.infected&&player.hp<50);
-  setMoodle('mPan',close>=3,close>=6);
+  setMoodle('mPan',panicky(),player.panic>85);
   setMoodle('mSue',player.slp<25,player.slp<8);
+  setMoodle('mFri',cold(),player.temp<12);
+  setMoodle('mCal',hot(),player.temp>92);
+  setMoodle('mAbu',boredOut(),player.bored>92);
+  setMoodle('mPes',overloaded(),carryWeight()>carryMax()*1.4);
   DOM.dmg.style.opacity=flashT>0?Math.min(1,flashT*3):0;
 }
 function setMoodle(id,on,crit){
@@ -2795,6 +2865,7 @@ const BOOKS={carp:'Manual de Carpintería',mech:'Guía del Mecánico',
 function xpNeed(lvl){return 100+lvl*90;}
 function gainXP(s,amt){
   if(!player.skills)return;
+  if(boredOut())amt*=.7;                             // sin cabeza para aprender
   player.xp[s]+=amt;
   while(player.xp[s]>=xpNeed(player.skills[s])){
     player.xp[s]-=xpNeed(player.skills[s]);player.skills[s]++;
@@ -2807,6 +2878,7 @@ function giveBook(s){player.books.push({skill:s,name:BOOKS[s],cap:3});
   msg('📖 Encontraste: '+BOOKS[s]);sfx(300,.12,'sine',.05);}
 function readBook(i){
   const bk=player.books[i];if(!bk)return;
+  player.bored=Math.max(0,player.bored-45);player.panic=Math.max(0,player.panic-25);
   for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<6){
     msg('Demasiado peligro para concentrarte…',true);return;}
   const lvl=player.skills[bk.skill];
@@ -2853,8 +2925,11 @@ function toggleInv(){
 const INV_ITEMS=[['food','🍖','Comida'],['water','💧','Agua'],
   ['med','🩹','Vendas'],['anti','💊','Antibióticos']];
 function renderInv(){
-  const cap=invCap();
-  let h='<div class="isec">CONSUMIBLES · tope '+cap+' c/u</div><div class="igrid">';
+  const cap=invCap(),w=carryWeight(),wm=carryMax();
+  let h='<div class="isec">CARGA '+w.toFixed(1)+' / '+wm.toFixed(0)+
+    (overloaded()?' · <span style="color:#ff6b5e">SOBRECARGADO</span>':'')+'</div>'+
+    '<div class="sbar"><i style="width:'+Math.min(100,w/wm*100)+'%"></i></div>'+
+    '<div class="isec">CONSUMIBLES · tope '+cap+' c/u</div><div class="igrid">';
   for(const[k,ic,n]of INV_ITEMS){
     const q=player.inv[k];
     h+='<div class="icell'+(q?'':' off')+'"><div class="ig">'+ic+'</div>'+
