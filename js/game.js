@@ -486,6 +486,7 @@ function genWorld(){
     if(SOLID[idx(i,j)]||SOLID[idx(i+1,j)]||clash)continue;
     cars.push({gx:i+1,gy:j+.5,vx:0,vy:0,axis:'x',r:T.r,type,
       fuel:rand(8,42),drivable:Math.random()<.72,hp:100,
+      tires:irand(25,101),engine:irand(30,101),trunk:{food:0,water:0,med:0,anti:0},
       col:T.col[irand(0,T.col.length)],looted:false,rt:0});break;
   }
   // cajas exteriores
@@ -1163,6 +1164,10 @@ function loadGame(){
     if(player.bored===undefined)player.bored=0;
     if(player.rawAge===undefined)player.rawAge=0;
     if(player.dirtyWater===undefined)player.dirtyWater=0;
+    for(const c of cars){                            // partes añadidas en v6
+      if(c.tires===undefined)c.tires=irand(25,101);
+      if(c.engine===undefined)c.engine=irand(30,101);
+      if(!c.trunk)c.trunk={food:0,water:0,med:0,anti:0};}
     for(const f of furns)if(f.rt===null||f.rt===undefined)f.rt=1e9;  // Infinity→null al serializar
     player.sleeping=false;
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
@@ -1364,8 +1369,9 @@ function updateHUD(day,night){
   DOM.foodFill.style.transform='scaleX('+(player.food/100)+')';
   DOM.waterFill.style.transform='scaleX('+(player.water/100)+')';
   DOM.staFill.style.transform='scaleX('+(player.sta/100)+')';
-  if(inCar){DOM.wName.textContent='🚗 Manejando';
-    DOM.ammo.textContent='⛽'+Math.max(0,Math.round(inCar.fuel));}
+  if(inCar){DOM.wName.textContent=(isHome(inCar)?'🚚 ':'🚗 ')+'Manejando';
+    DOM.ammo.textContent='⛽'+Math.max(0,Math.round(inCar.fuel))+
+      ' 🛞'+Math.round(inCar.tires||0)+' ⚙️'+Math.round(inCar.engine||0);}
   else{const usingGun=player.useGun&&player.hasGun;
     DOM.wName.textContent=usingGun?GUN.n:MELEE[player.wTier].n;
     DOM.ammo.textContent=usingGun?('🔸'+player.ammo)
@@ -2468,6 +2474,8 @@ addEventListener('keydown',e=>{
   if(k==='b')tryBuild();
   if(k==='z')trySleep();
   if(k==='x')tryCook();
+  if(k==='v')trySiphon();
+  if(k==='t')tryTrunk();
   if(k==='l')toggleHelmet();
   if(k==='g')manualSave();
 });
@@ -2550,6 +2558,8 @@ function enterExitCar(){
       msg('🔧 Hiciste puente al motor — ¡arrancó!');sfx(70,.4,'sawtooth',.06,140);}
     else{msg('Este auto no enciende… (🔑 llaves o Mecánica 2 para puente)',true);
       sfx(90,.3,'sawtooth',.05,50);return;}}
+  if((c.engine||0)<=0){msg('🔧 El motor está fundido — repáralo (llave inglesa + chatarra)',true);
+    sfx(80,.3,'sawtooth',.05,40);return;}
   if(c.fuel<15&&player.gas>0){player.gas--;c.fuel+=30;msg('⛽ Echaste un bidón (+30)');}
   if(c.fuel<=0){msg('Sin gasolina — busca bidones en la GASOLINERA',true);return;}
   inCar=c;msg('🚗 Al volante (el motor hace RUIDO…)');sfx(80,.4,'sawtooth',.06,130);
@@ -2568,7 +2578,10 @@ function driveCar(dt){
     gv={x:g.x/gl,y:g.y/gl};}
   const fl=FLOOR[idx(clamp(Math.floor(c.gx),0,MW-1),clamp(Math.floor(c.gy),0,MH-1))];
   const onRoad=fl>=4&&fl<6;
-  const maxSp=(onRoad?8.2:4.6)*(c.hp<40?.6:1);
+  // llantas y motor mandan: gomas gastadas frenan y un motor roto no tira
+  const tw=.55+(c.tires===undefined?100:c.tires)/100*.45;
+  const ew=.5+(c.engine===undefined?100:c.engine)/100*.5;
+  const maxSp=(onRoad?8.2:4.6)*(c.hp<40?.6:1)*tw*ew;
   const ac=1-Math.pow(.02,dt);
   c.vx=lerp(c.vx,gv.x*maxSp,ac);c.vy=lerp(c.vy,gv.y*maxSp,ac);
   let sp=hyp(c.vx,c.vy);
@@ -2589,6 +2602,7 @@ function driveCar(dt){
     const d=hyp(z.gx-c.gx,z.gy-c.gy);
     if(d<c.r+z.r+.1){
       if(sp>2.6){const dm=sp*8;z.hp-=dm;z.stun=.4;z.forced=8;
+        c.tires=Math.max(0,(c.tires===undefined?100:c.tires)-1.2);   // atropellar destroza las gomas
         blood(z.gx,z.gy,10);dmgText(z.gx,z.gy,Math.round(dm),'#ffd27a');
         const dd=Math.max(d,.1);
         z.gx+=(z.gx-c.gx)/dd*.9;z.gy+=(z.gy-c.gy)/dd*.9;
@@ -2731,8 +2745,54 @@ function nearBed(){
     hyp(fo.gx+.5-player.gx,fo.gy+.5-player.gy)<1.6)return fo;
   return null;
 }
+/* ── Vehículos: partes, sifón, cajuela y dormir dentro ──
+   Los camiones, autobuses y vans son lo bastante grandes para vivir en
+   ellos: puedes dormir dentro y usar la cajuela como alijo. */
+const HOME_V={truck:1,bus:1,van:1};
+function isHome(c){return !!(c&&HOME_V[c.type]);}
+// Sacar gasolina del depósito de otro coche.
+function trySiphon(){
+  const c=inCar?null:nearCar();
+  if(!c)return false;
+  if(c.fuel<5){msg('Ese depósito está seco');return true;}
+  const take=Math.min(2,Math.floor(c.fuel/12));
+  if(take<=0){msg('Queda muy poca gasolina para sifonar');return true;}
+  c.fuel-=take*12;player.gas+=take;gainXP('mech',12);
+  msg('⛽ Sifonaste '+take+' bidón(es) del depósito');
+  sfx(200,.25,'sine',.04);
+  return true;
+}
+// Cajuela: alijo que viaja contigo.
+function tryTrunk(){
+  const c=inCar||nearCar();
+  if(!c)return false;
+  if(!c.trunk)c.trunk={food:0,water:0,med:0,anti:0};
+  let moved=0,dir='';
+  const keys=['food','water','med','anti'];
+  const carrying=keys.reduce((a,k)=>a+player.inv[k],0);
+  if(carrying>0){                                  // guardar lo que llevas
+    for(const k of keys){const n=player.inv[k];
+      if(n>0){c.trunk[k]+=n;player.inv[k]=0;moved+=n;}}
+    dir='guardaste en la cajuela';
+  }else{                                           // si vas vacío, sacar
+    for(const k of keys){
+      while(c.trunk[k]>0&&player.inv[k]<invCap()){c.trunk[k]--;player.inv[k]++;moved++;}}
+    dir='sacaste de la cajuela';
+  }
+  if(moved<=0){msg('La cajuela está vacía');return true;}
+  msg('🧰 '+moved+' objeto(s): '+dir);sfx(260,.12,'square',.04);
+  return true;
+}
 function trySleep(){
-  if(inCar||player.sleeping||dead)return;
+  if(player.sleeping||dead)return;
+  // Dormir dentro de un camión, autobús o van: tu casa rodante.
+  if(inCar){
+    if(!isHome(inCar)){msg('Aquí no cabes para dormir — busca un camión, van o autobús');return;}
+    if(player.slp>=85){msg('No tienes sueño todavía');return;}
+    for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<5){
+      msg('Hay zombis rondando el vehículo…',true);return;}
+    player.sleeping=true;msg('😴 Durmiendo dentro del vehículo…');saveGame();return;
+  }
   if(!nearBed()){msg('Necesitas una cama para dormir');return;}
   if(player.slp>=85){msg('No tienes sueño todavía');return;}
   for(const z of zombies)if(hyp(z.gx-player.gx,z.gy-player.gy)<6){
@@ -3074,6 +3134,16 @@ const RECIPES=[
     cost:{scrap:3},req:{mech:1},tool:'wrench',
     can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
     make:()=>repairCar()},
+  {id:'llantas',ic:'🛞',n:'Cambiar llantas',d:'Restaura las gomas del auto de al lado',
+    cost:{scrap:2},req:{mech:1},tool:'wrench',
+    can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
+    make(){const c=inCar||nearCar();c.tires=100;gainXP('mech',25);
+      msg('🛞 Llantas como nuevas');sfx(240,.18,'square',.05);}},
+  {id:'motor',ic:'⚙️',n:'Reparar motor',d:'Devuelve la vida al motor del auto de al lado',
+    cost:{scrap:4},req:{mech:2},tool:'wrench',
+    can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
+    make(){const c=inCar||nearCar();c.engine=100;gainXP('mech',40);
+      msg('⚙️ Motor a punto');sfx(90,.3,'sawtooth',.05,120);}},
   {id:'reparar',ic:'🔧',n:'Reparar arma',d:'Restaura la condición del arma equipada',
     cost:{scrap:2},
     can:()=>player.wTier>0&&player.wDur<player.wDurMax,
