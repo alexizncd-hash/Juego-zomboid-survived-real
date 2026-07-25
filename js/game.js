@@ -89,7 +89,11 @@ const CFG={
   biteChance:.12,          // probabilidad de infección por golpe recibido
   // sueño
   sleepTimeScale:22, sleepRecover:13, sleepHeal:2.2,
-  battLife:150             // segundos de luz que da cada pila del casco
+  battLife:150,            // segundos de luz que da cada pila del casco
+  // utilidades del pueblo: se cortan solas conforme todo se degrada
+  powerDay:3,              // día en que se va la luz de la red
+  waterDay:5,              // día en que se corta el agua
+  respawnDay:4             // desde este día el botín YA NO reaparece
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -112,6 +116,7 @@ let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOp
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
 let inCar=null,barrs={},gates={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
+let power=true,water=true;   // luz y agua de la red del pueblo
 let weather=null,amb=[],puffs=[];               // clima, partículas ambientales, polvo
 const REDUCE_MOTION=(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 const idx=(i,j)=>j*MW+i;
@@ -563,7 +568,7 @@ function init(){
   fires=[];crafting=false;skillsOpen=false;invOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
   weather={type:'clear',t:rand(30,60),inten:0,target:0};amb=[];puffs=[];
-  inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;
+  inCar=null;barrs={};radioFound=false;winT=0;won=false;engineT=0;power=true;water=true;
   zombies=[];corpses=[];parts=[];pools=[];shots=[];dmgs=[];
   gameTime=0;kills=0;dead=false;paused=false;flashT=0;spawnT=1;freeze=0;shake=0;saveT=25;
   prevNight=false;groanT=5;cam={x:0,y:0};
@@ -672,6 +677,32 @@ function helmetTick(dt){
       msg('🔋 Se acabaron las pilas del casco',true);sfx(150,.25,'square',.05,60);}
     else msg('🔋 Pila gastada — quedan '+player.batt);
   }
+}
+/* ── Utilidades del pueblo ──
+   Nadie mantiene ya la central ni la potabilizadora: la luz se va el día
+   powerDay y el agua el waterDay. Desde ahí, la luz solo la dan tus
+   generadores y fogatas, y el agua hay que buscarla embotellada. */
+function utilitiesTick(day){
+  if(power&&day>=CFG.powerDay){
+    power=false;
+    for(const p of props)if(p.type==='lamp')p.on=false;   // se apaga el alumbrado
+    msg('💡 SE FUE LA LUZ. El pueblo entero se apagó…',true);
+    sfx(180,.5,'sawtooth',.05,60);
+  }
+  if(water&&day>=CFG.waterDay){
+    water=false;
+    msg('🚱 SE CORTÓ EL AGUA. Las llaves ya no dan nada…',true);
+    sfx(140,.5,'sine',.05,50);
+  }
+}
+// Beber del grifo: solo mientras la red aguante.
+function tryTap(){
+  const f=nearLoot();
+  if(!f||!f.o||(f.o.type!=='lavamanos'&&f.o.type!=='escusado'))return false;
+  if(!water||player.water>=97)return false;      // sin red o sin sed: saquéalo normal
+  player.water=clamp(player.water+40,0,100);
+  msg('🚰 Bebiste del grifo (+40)');sfx(520,.2,'sine',.04);
+  return true;
 }
 function toggleHelmet(){
   if(!player.helmet){msg('No tienes casco de minero',true);return;}
@@ -1002,7 +1033,7 @@ function saveGame(){
       floor:u8b64(FLOOR),solid:u8b64(SOLID),whue:u8b64(WHUE),
       buildings,furns,crates,cars,treesL,props,fires,barrs,gates,zombies,player,
       inCar:inCar?cars.indexOf(inCar):-1,
-      gameTime,kills,radioFound,won,prevNight,groanT,spawnT,winT,engineT,weather};
+      gameTime,kills,radioFound,won,prevNight,groanT,spawnT,winT,engineT,weather,power,water};
     localStorage.setItem(SAVE_KEY,JSON.stringify(s));
     return true;
   }catch(e){return false;}
@@ -1032,6 +1063,8 @@ function loadGame(){
     corpses=[];parts=[];pools=[];shots=[];dmgs=[];amb=[];puffs=[];
     gameTime=s.gameTime;kills=s.kills;radioFound=s.radioFound;won=!!s.won;
     prevNight=s.prevNight;groanT=s.groanT;spawnT=s.spawnT;winT=s.winT||0;engineT=s.engineT||0;
+    power=s.power!==undefined?s.power:(dayNum()<CFG.powerDay);
+    water=s.water!==undefined?s.water:(dayNum()<CFG.waterDay);
     weather=s.weather||{type:'clear',t:40,inten:0,target:0};
     inCar=(s.inCar>=0&&s.inCar<cars.length)?cars[s.inCar]:null;
     dead=false;paused=false;crafting=false;flashT=0;shake=0;freeze=0;saveT=25;
@@ -1189,10 +1222,15 @@ function update(dt){
       sfx(90,.25,'sawtooth',.05,50);return false;}
     return true;});
 
-  for(const f of furns)if(f.looted){f.rt-=dt;if(f.rt<=0)f.looted=false;}
-  for(const c of crates)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
-  for(const c of cars)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
-  for(const p of props)if(p.type==='dumpster'&&p.looted){p.rt-=dt;if(p.rt<=0)p.looted=false;}
+  // A partir de CFG.respawnDay lo saqueado ya NO vuelve: lo que te llevaste
+  // el primer día es lo que hay. El saqueo temprano importa de verdad.
+  if(day<CFG.respawnDay){
+    for(const f of furns)if(f.looted){f.rt-=dt;if(f.rt<=0)f.looted=false;}
+    for(const c of crates)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
+    for(const c of cars)if(c.looted){c.rt-=dt;if(c.rt<=0)c.looted=false;}
+    for(const p of props)if(p.type==='dumpster'&&p.looted){p.rt-=dt;if(p.rt<=0)p.looted=false;}
+  }
+  utilitiesTick(day);
 
   for(const p of parts){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.life-=dt;}
   parts=parts.filter(p=>p.life>0);
@@ -1230,6 +1268,8 @@ function updateHUD(day,night){
   if(player.pack)ts+='🎒';
   if(player.batt>0)ts+='🔋'+player.batt;
   if(player.carKeys>0)ts+='🔑'+player.carKeys;
+  if(!power)ts+=' 💡❌';                                  // servicios caídos
+  if(!water)ts+=' 🚱';
   DOM.rTools.textContent=ts;
   DOM.btnLamp.classList.toggle('have',!!player.helmet);   // botón solo si tienes casco
   DOM.btnLamp.classList.toggle('on',helmetOn());
@@ -1248,7 +1288,10 @@ function updateHUD(day,night){
     DOM.hint.style.display='block';
     DOM.hint.textContent=(TOUCH?'📦 ':'E — ')+gateLabel(ng).toUpperCase();}
   else if(nl){DOM.hint.style.display='block';
-    DOM.hint.textContent=(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
+    const grifo=water&&player.water<97&&nl.o&&
+      (nl.o.type==='lavamanos'||nl.o.type==='escusado');
+    DOM.hint.textContent=grifo?(TOUCH?'📦 BEBER DEL GRIFO':'E — BEBER DEL GRIFO')
+      :(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
   else DOM.hint.style.display='none';
   DOM.btnLoot.classList.toggle('on',!!nl);
   DOM.btnGun.classList.toggle('have',player.hasGun&&!inCar);
@@ -2192,7 +2235,7 @@ function draw(){
       lctx.fillStyle=g;lctx.beginPath();lctx.arc(fx,fy,rr,0,7);lctx.fill();
     }
     for(const p of props){                          // postes de luz alumbran la calle
-      if(p.type!=='lamp'||!p.on)continue;
+      if(p.type!=='lamp'||!p.on||!power)continue;
       const lx=g2sx(p.gx,p.gy)-cam.x+shx+13,ly=g2sy(p.gx,p.gy)-cam.y+shy-36;
       if(lx<-140||lx>VW+140||ly<-140||ly>VH+140)continue;
       const rr=70+Math.sin(gameTime*20+p.gx*5)*2.5;  // leve titileo
@@ -2297,7 +2340,7 @@ addEventListener('keydown',e=>{
   if(k==='i'&&started&&!dead&&!paused){toggleInv();return;}
   if(!player||paused||crafting||skillsOpen||invOpen||!started)return;
   if(k===' ')atkHold=true;
-  if(k==='e'){if(!tryGate())tryLoot();}
+  if(k==='e'){if(!tryGate()&&!tryTap())tryLoot();}
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
   if(k==='1')useItem('food');
   if(k==='2')useItem('water');
@@ -2350,7 +2393,7 @@ function bindTap(id,fn){
   el.addEventListener('touchstart',e=>{e.preventDefault();e.stopPropagation();fn();},{passive:false});
   el.addEventListener('mousedown',e=>{e.preventDefault();fn();});
 }
-bindTap('btnLoot',()=>{if(!tryGate())tryLoot();});
+bindTap('btnLoot',()=>{if(!tryGate()&&!tryTap())tryLoot();});
 bindTap('btnCraft',toggleCraft);
 bindTap('btnGun',()=>{if(player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}});
 bindTap('btnCar',enterExitCar);
@@ -2647,7 +2690,7 @@ function drawProp(p,sx,sy,night){
     const hx=sx+13,hy=sy-39;
     ctx.fillStyle='#2f343b';                            // farola
     ctx.beginPath();ctx.moveTo(hx-5,hy);ctx.lineTo(hx+5,hy);ctx.lineTo(hx+3,hy+4);ctx.lineTo(hx-3,hy+4);ctx.closePath();ctx.fill();
-    if(p.on&&night){                                    // haz cálido de la lámpara
+    if(p.on&&power&&night){                             // haz cálido de la lámpara
       ctx.fillStyle='#ffe9a8';
       ctx.beginPath();ctx.arc(hx,hy+3,3.1,0,7);ctx.fill();
       const gl=ctx.createRadialGradient(hx,hy+3,1,hx,hy+3,26);
