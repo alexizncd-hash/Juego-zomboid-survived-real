@@ -86,7 +86,8 @@ body.touch #cv{cursor:default}
   gap:11px;align-items:center;z-index:8}
 #actCol .abtn{width:62px;height:62px;display:none}
 #actCol #btnLoot{display:flex;opacity:.35}
-#actCol #btnCraft,#actCol #btnSkills,#actCol #btnInv{display:flex}
+#actCol #btnCraft,#actCol #btnSkills,#actCol #btnInv,#actCol #btnSneak{display:flex}
+#btnSneak.on{border-color:#7dd97d;background:rgba(125,217,125,.2)}
 #btnLamp.have{display:flex}
 #btnLamp.on{border-color:#d9c26a;background:rgba(217,194,106,.2)}
 #btnLoot.on{opacity:1;border-color:#d9c26a}

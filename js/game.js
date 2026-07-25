@@ -21,7 +21,7 @@ const DOM={
   btnBed:$('btnBed'),btnBuild:$('btnBuild'),btnCook:$('btnCook'),btnSkills:$('btnSkills'),
   craft:$('craft'),craftMats:$('craftMats'),recList:$('recList'),
   skills:$('skills'),skillList:$('skillList'),
-  inv:$('inv'),invList:$('invList'),btnInv:$('btnInv'),btnLamp:$('btnLamp'),
+  inv:$('inv'),invList:$('invList'),btnInv:$('btnInv'),btnLamp:$('btnLamp'),btnSneak:$('btnSneak'),
   slots:{food:$('s0'),water:$('s1'),med:$('s2'),anti:$('s3')},
   slotN:{},moodle:{}
 };
@@ -102,7 +102,12 @@ const CFG={
   carryBase:26,            // peso que aguantas sin ir sobrecargado
   // comida y agua
   spoilTime:260,           // segundos hasta que la carne cruda se pudre
-  rainRate:.55, barrelMax:12   // llenado del barril y su capacidad
+  rainRate:.55, barrelMax:12,  // llenado del barril y su capacidad
+  // sentidos y sigilo
+  sneakSpeed:1.9,          // velocidad agachado
+  sneakHide:.45,           // cuánto te oculta ir agachado
+  runLoud:1.5,             // correr te delata
+  lampLoud:1.35            // la lámpara encendida te hace visible de noche
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -574,7 +579,7 @@ function init(){
     xp:{carp:0,mech:0,elec:0,med:0,str:0},books:[],mechAcc:0,
     tools:{hammer:false,saw:false,screw:false,wrench:false,crow:false},
     pack:false,helmet:false,helmOn:false,batt:0,battT:0,carKeys:0,
-    temp:50,panic:0,bored:0,rawAge:0,dirtyWater:0,
+    temp:50,panic:0,bored:0,rawAge:0,dirtyWater:0,sneak:false,
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;skillsOpen=false;invOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
@@ -604,7 +609,30 @@ function blood(gx,gy,n){
   pools.push({gx:gx+rand(-.15,.15),gy:gy+rand(-.15,.15),r:rand(.18,.4),life:60});
   if(pools.length>150)pools.shift();
 }
-function noise(gx,gy,r){for(const z of zombies)if(hyp(z.gx-gx,z.gy-gy)<r)z.forced=7;}
+/* ── Sentidos y sigilo ──
+   Los zombis te detectan por lo que HACES, no solo por la distancia:
+   agacharte y moverte despacio te esconde; correr, ir en coche o llevar
+   la lámpara encendida de noche te delata a gritos. */
+function stealthMul(night){
+  let m=1;
+  if(player.sneak)m*=CFG.sneakHide;                // agachado: mucho más difícil verte
+  const moving=hyp(player.vx||0,player.vy||0);
+  if(moving>CFG.walkSpeed*1.15)m*=CFG.runLoud;     // corriendo haces ruido
+  else if(moving<.15)m*=.8;                        // quieto pasas más desapercibido
+  if(night&&helmetOn())m*=CFG.lampLoud;            // tu lámpara es un faro
+  if(inCar)m*=2.2;                                 // el motor se oye lejísimos
+  if(indoors())m*=.8;                              // bajo techo te ven peor
+  return m;
+}
+function noise(gx,gy,r){
+  for(const z of zombies){
+    const d=hyp(z.gx-gx,z.gy-gy);
+    if(d<r){z.forced=7;z.tx=gx;z.ty=gy;}
+    // MIGRACIÓN: un estruendo grande arrastra hordas del doble de lejos,
+    // que caminan hacia el sitio aunque no te vean.
+    else if(r>=12&&d<r*2){z.forced=Math.max(z.forced,5);z.tx=gx;z.ty=gy;}
+  }
+}
 
 /* ================= COLISIÓN (tiles) ================= */
 // Una ventana (código 2) solo bloquea el paso si está tapiada: sin tablones
@@ -632,17 +660,56 @@ function collideTiles(e){
 /* ================= ZOMBIS ================= */
 const CIV_SHIRTS=['#7a4a4a','#4a5a7a','#5a7a4a','#7a6a3a','#6a4a7a','#4a6a6a','#8a8a86'];
 const CIV_PANTS=['#3a4250','#4a3a30','#2e3a2e','#50505a'];
+// Los zombis llevan la ropa de lo que eran: bata en el hospital, azul en
+// la comisaría, overol en el taller, naranja en la cárcel…
+const ZOM_UNIFORM={
+  hospital:{shirt:'#dfe6e8',pants:'#cdd6d8',n:'bata'},
+  farmacia:{shirt:'#e2ecdf',pants:'#c8d4c6',n:'bata'},
+  comisaria:{shirt:'#33507a',pants:'#243a56',n:'uniforme azul'},
+  carcel:{shirt:'#d2712a',pants:'#b8601f',n:'overol naranja'},
+  taller_mec:{shirt:'#3f4a52',pants:'#333c43',n:'overol de taller'},
+  ferreteria:{shirt:'#8a6a2a',pants:'#4a4238',n:'mandil'},
+  bodega:{shirt:'#7a6a4a',pants:'#4a4232',n:'mono de almacén'},
+  bar:{shirt:'#2e2e33',pants:'#1f1f24',n:'camisa negra'},
+  restaurante:{shirt:'#e8e4d8',pants:'#3a3a36',n:'uniforme de cocina'},
+  tienda:{shirt:'#4a7a5a',pants:'#3a4a3f',n:'chaleco de tienda'},
+  escuela:{shirt:'#5a5a8a',pants:'#3a3a52',n:'uniforme escolar'},
+  iglesia:{shirt:'#2a2a2e',pants:'#232326',n:'sotana'},
+  oficina:{shirt:'#c8ccd2',pants:'#33384a',n:'camisa de oficina'},
+  gasolinera:{shirt:'#c9412f',pants:'#3a3a36',n:'overol rojo'},
+  barberia:{shirt:'#e0e4e6',pants:'#33383c',n:'bata de barbero'}
+};
+// ¿En qué edificio cae este punto?
+function buildingAt(gx,gy){
+  for(const b of buildings)
+    if(gx>=b.x&&gx<=b.x+b.w&&gy>=b.y&&gy<=b.y+b.h)return b;
+  return null;
+}
 function newZombie(gx,gy,forceType){
   const day=dayNum();let type=forceType;
   if(!type){const r=Math.random();
     type=(day>=3&&r<.1)?'tank':(day>=2&&r<.3)?'runner':'normal';}
   const base={gx,gy,dir:0,wd:rand(0,7),wt:0,cd:0,flash:0,stun:0,forced:0,anim:rand(0,7),type,
     shirt:CIV_SHIRTS[irand(0,CIV_SHIRTS.length)],pants:CIV_PANTS[irand(0,CIV_PANTS.length)]};
+  const b=buildingAt(gx,gy),uni=b&&ZOM_UNIFORM[b.type];
+  if(uni){base.shirt=uni.shirt;base.pants=uni.pants;base.uni=b.type;}
   if(type==='runner')return Object.assign(base,{r:.26,hp:22+(day-1)*5,mhp:22+(day-1)*5,sp:rand(2.1,2.5),dmg:6+(day-1),shirt:'#b06a3a'});
   if(type==='tank')return Object.assign(base,{r:.44,hp:120+(day-1)*22,mhp:120+(day-1)*22,sp:rand(.55,.7),dmg:15+(day-1),shirt:'#5e6e54'});
   return Object.assign(base,{r:.32,hp:38+(day-1)*8,mhp:38+(day-1)*8,sp:rand(.9,1.35)+(day-1)*.04,dmg:8+(day-1)});
 }
 function spawnZombie(forceType,nearEdge){
+  // Una parte de los zombis estaba ya DENTRO de los edificios cuando cayó
+  // todo: son los que llevan la ropa del sitio (bata, uniforme, overol).
+  if(!nearEdge&&buildings.length&&Math.random()<.42){
+    for(let t=0;t<25;t++){
+      const b=buildings[irand(0,buildings.length)];
+      const i=irand(b.x+1,b.x+b.w-1),j=irand(b.y+1,b.y+b.h-1);
+      if(i<1||j<1||i>=MW-1||j>=MH-1)continue;
+      if(SOLID[idx(i,j)]!==0)continue;
+      if(hyp(i-player.gx,j-player.gy)<12)continue;
+      zombies.push(newZombie(i+.5,j+.5,forceType));return;
+    }
+  }
   for(let t=0;t<60;t++){
     let i,j;
     if(nearEdge){const s=irand(0,4);
@@ -1076,7 +1143,7 @@ function attack(){
   if(!hit){hitHard=bashGate(w);hit=hitHard;}          // puertas y escaparates: con o sin arma
   if(!hit&&player.wTier>=1){hitHard=chopTree(w)||dismantleFurniture(w);hit=hitHard;}
   if(hit){freeze=.045;shake=Math.max(shake,3);vib(18);wearWeapon(hitHard?1:0);}
-  noise(player.gx,player.gy,2.5);
+  noise(player.gx,player.gy,player.sneak?1.2:2.5);   // agachado golpeas más callado
   sfx(hit?115:70,.1,'square',hit?.07:.03);
 }
 function shoot(){
@@ -1164,6 +1231,7 @@ function loadGame(){
     if(player.bored===undefined)player.bored=0;
     if(player.rawAge===undefined)player.rawAge=0;
     if(player.dirtyWater===undefined)player.dirtyWater=0;
+    if(player.sneak===undefined)player.sneak=false;
     for(const c of cars){                            // partes añadidas en v6
       if(c.tires===undefined)c.tires=irand(25,101);
       if(c.engine===undefined)c.engine=irand(30,101);
@@ -1242,7 +1310,7 @@ function update(dt){
   if(keys['d']||keys['arrowright'])ix+=1;
   if(joy){ix=joy.x;iy=joy.y;}
   const il=hyp(ix,iy);
-  const wantRun=(keys['shift']||(joy&&joy.m>.84))&&il>0;
+  const wantRun=!player.sneak&&(keys['shift']||(joy&&joy.m>.84))&&il>0;
   let maxSp=CFG.walkSpeed;
   const over=overloaded();
   if(wantRun&&player.sta>0){maxSp=CFG.runSpeed;
@@ -1252,6 +1320,8 @@ function update(dt){
   if(player.slp<25)maxSp*=CFG.sleepySlow;
   if(cold())maxSp*=.85;                              // aterido: te mueves peor
   if(over)maxSp*=.8;                                 // cargado hasta arriba
+  if(player.sneak){maxSp=Math.min(maxSp,CFG.sneakSpeed);   // agachado vas despacio
+    player.sta=clamp(player.sta+CFG.staRegen*.4*dt,0,100);}
   let gv={x:0,y:0};
   if(il>0){
     const g=scr2grid(ix,iy),gl=hyp(g.x,g.y)||1;
@@ -1286,20 +1356,26 @@ function update(dt){
   let detect=night?CFG.detectNight:CFG.detectDay;
   if(raining())detect*=.72;                       // la lluvia tapa tus ruidos
   detect*=(1-foggy()*.3);                         // la niebla también te oculta
+  detect*=stealthMul(night);                      // y lo que TÚ hagas pesa más que nada
   for(const z of zombies){
     z.cd=Math.max(0,z.cd-dt);z.flash=Math.max(0,z.flash-dt);
     z.stun=Math.max(0,z.stun-dt);z.forced=Math.max(0,z.forced-dt);
     z.anim+=dt*(z.type==='runner'?10:4.5);
     if(z.stun>0)continue;
-    const dx=player.gx-z.gx,dy=player.gy-z.gy,d=hyp(dx,dy);
-    if(d<detect||z.forced>0){
+    const seen=hyp(player.gx-z.gx,player.gy-z.gy)<detect;
+    // si no te ve pero oyó algo, va hacia el RUIDO, no hacia ti
+    const tgx=(!seen&&z.forced>0&&z.tx!==undefined)?z.tx:player.gx;
+    const tgy=(!seen&&z.forced>0&&z.ty!==undefined)?z.ty:player.gy;
+    const dx=tgx-z.gx,dy=tgy-z.gy,d=Math.max(hyp(dx,dy),.001);
+    if(seen||z.forced>0){
       z.dir=Math.atan2(dy,dx);
       const bt=barricadeAhead(z);
       if(bt){if(z.cd<=0){z.cd=1.05;hitBarr(bt,z);}continue;}
       const gt=gateAhead(z);                        // una puerta cerrada no los detiene para siempre
       if(gt){if(z.cd<=0){z.cd=1.2;hitGate(gt,z);}continue;}
       z.gx+=dx/d*z.sp*dt;z.gy+=dy/d*z.sp*dt;
-      if(!inCar&&d<player.r+z.r+.15&&z.cd<=0){
+      const dPly=hyp(player.gx-z.gx,player.gy-z.gy);
+      if(!inCar&&dPly<player.r+z.r+.15&&z.cd<=0){
         z.cd=.9;
         let zdm=z.dmg;
         if(player.armor>0){
@@ -1394,6 +1470,7 @@ function updateHUD(day,night){
   DOM.rTools.textContent=ts;
   DOM.btnLamp.classList.toggle('have',!!player.helmet);   // botón solo si tienes casco
   DOM.btnLamp.classList.toggle('on',helmetOn());
+  DOM.btnSneak.classList.toggle('on',!!player.sneak);
   if(radioFound){DOM.obj.style.display='block';
     DOM.obj.textContent=day>=CFG.survivalDays?'🚁 ¡EL HELICÓPTERO ESTÁ EN EL CLARO NE!'
       :'🚁 Extracción: DÍA '+CFG.survivalDays+' · claro NE';}
@@ -2257,7 +2334,7 @@ function draw(){
       const swingA=player.swing>0?lerp(.9,-1.15,player.swing/.18):.15;
       drawHuman(it._sx,it._sy,faceOf(player.dir),{shirt:'#5d738f',pants:'#3a4250',
         hair:'#3a2e22',walk:player.walk,swingA,pack:true,
-        helmet:player.helmet,lamp:helmetOn(),
+        helmet:player.helmet,lamp:helmetOn(),scale:player.sneak?.86:1,
         wTier:player.wTier,gun:player.useGun&&player.hasGun,gunFlash:player.gunFlash});
       if(player.swing>0){
         const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir));
@@ -2474,6 +2551,9 @@ addEventListener('keydown',e=>{
   if(k==='b')tryBuild();
   if(k==='z')trySleep();
   if(k==='x')tryCook();
+  if(k==='r'){player.sneak=!player.sneak;
+    msg(player.sneak?'🤫 Agachado — te ven menos':'🚶 De pie');
+    sfx(player.sneak?260:340,.07,'triangle',.03);}
   if(k==='v')trySiphon();
   if(k==='t')tryTrunk();
   if(k==='l')toggleHelmet();
@@ -2529,6 +2609,9 @@ bindTap('btnCook',tryCook);
 bindTap('btnSkills',toggleSkills);
 bindTap('btnInv',toggleInv);
 bindTap('btnLamp',toggleHelmet);
+bindTap('btnSneak',()=>{player.sneak=!player.sneak;
+  msg(player.sneak?'🤫 Agachado — te ven menos':'🚶 De pie');
+  sfx(player.sneak?260:340,.07,'triangle',.03);});
 const slotK=[['s0','food'],['s1','water'],['s2','med'],['s3','anti']];
 for(const[id,k]of slotK)bindTap(id,()=>useItem(k));
 
