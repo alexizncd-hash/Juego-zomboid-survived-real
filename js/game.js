@@ -111,7 +111,7 @@ let player,zombies,corpses,parts,pools,shots,dmgs,cam;
 let gameTime,kills,dead=false,started=false,paused=false,crafting=false,skillsOpen=false,invOpen=false,flashT=0,spawnT=0,freeze=0,shake=0;
 let prevNight=false,groanT=5;
 let keys={},atkHold=false,joy=null,aim={x:0,y:0,has:false};
-let inCar=null,barrs={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
+let inCar=null,barrs={},gates={},radioFound=false,winT=0,won=false,engineT=0,fires=[];
 let weather=null,amb=[],puffs=[];               // clima, partículas ambientales, polvo
 const REDUCE_MOTION=(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 const idx=(i,j)=>j*MW+i;
@@ -216,6 +216,14 @@ const SPECIALS=[
   {type:'oficina',w:9,h:7,hue:2,name:'OFICINAS',furn:['mesa','estante','casillero','ropero']},
   {type:'iglesia',w:9,h:8,hue:0,name:'IGLESIA',furn:['mesa','mesa','estante','ropero']}
 ];
+// Probabilidad de que la puerta principal esté cerrada con llave, por tipo.
+const LOCK_P={farmacia:.85,comisaria:.9,carcel:.95,hospital:.5,ferreteria:.7,
+  taller_mec:.6,bodega:.7,oficina:.6,escuela:.5,bar:.45,tienda:.5,restaurante:.45,
+  barberia:.4,iglesia:.15,gasolinera:.4,casa:.35};
+// Comercios con escaparate a la calle.
+const SHOPFRONT={tienda:1,farmacia:1,barberia:1,ferreteria:1,bar:1,restaurante:1,
+  vitrina:1,oficina:1};
+const DOOR_HP=120,GLASS_HP=40;
 function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
   const doorI=bx+Math.floor(bw/2),wide=bw>=10;
   const doors=[{i:doorI,j:by+bh-1}];
@@ -235,6 +243,26 @@ function carveBuilding(bx,by,bw,bh,hue,furnTypes,btype,bname){
     }
   }
   for(const d of doors)FLOOR[idx(d.i,d.j+1)]=8;
+  // Puertas de verdad: bloquean hasta abrirlas. Las de sitios con cosas de
+  // valor (farmacia, comisaría, cárcel…) suelen estar CERRADAS CON LLAVE.
+  for(const d of doors){
+    SOLID[idx(d.i,d.j)]=7;WHUE[idx(d.i,d.j)]=hue;
+    gates[d.i+','+d.j]={i:d.i,j:d.j,kind:'door',bt:btype,
+      locked:Math.random()<(LOCK_P[btype]!==undefined?LOCK_P[btype]:.3),
+      open:false,hp:DOOR_HP,mhp:DOOR_HP};
+  }
+  // Escaparate de cristal en la fachada de los comercios: se ve el interior,
+  // no se puede cruzar… hasta romperlo (mucho ruido).
+  if(SHOPFRONT[btype]){
+    for(const off of[-2,2,3]){
+      const gi=doorI+off,gj=by+bh-1;
+      if(gi<=bx||gi>=bx+bw-1)continue;
+      if(SOLID[idx(gi,gj)]!==1&&SOLID[idx(gi,gj)]!==2)continue;
+      SOLID[idx(gi,gj)]=6;WHUE[idx(gi,gj)]=hue;
+      gates[gi+','+gj]={i:gi,j:gj,kind:'glass',bt:btype,locked:false,
+        open:false,hp:GLASS_HP,mhp:GLASS_HP};
+    }
+  }
   // partición interior en cuartos con muros internos y una puerta cada uno
   const doorTiles=[],rooms=[];
   partitionRoom(bx+1,by+1,bx+bw-2,by+bh-2,0,rooms,doorTiles,hue);
@@ -364,7 +392,7 @@ function furnishRooms(rooms,furnTypes,btype,doorTiles,doors){
 }
 function genWorld(){
   FLOOR=new Uint8Array(MW*MH);SOLID=new Uint8Array(MW*MH);WHUE=new Uint8Array(MW*MH);
-  buildings=[];furns=[];crates=[];cars=[];treesL=[];statics=[];props=[];
+  buildings=[];furns=[];crates=[];cars=[];treesL=[];statics=[];props=[];gates={};
   for(let j=0;j<MH;j++)for(let i=0;i<MW;i++)FLOOR[idx(i,j)]=irand(0,4);
   const ry=Math.floor(MH/2),rx=Math.floor(MW/2);
   // ── retícula de calles (avenidas cada ~20 tiles) que forma manzanas ──
@@ -497,6 +525,7 @@ function buildStatics(){
   for(const f of furns)if(!f.gone)statics.push({kind:'furn',o:f,gx:f.gx,gy:f.gy,d:f.gx+f.gy});
   for(const c of crates)statics.push({kind:'crate',o:c,gx:c.gx,gy:c.gy,d:c.gx+c.gy});
   for(const p of props)statics.push({kind:'prop',o:p,gx:p.gx,gy:p.gy,d:p.gx+p.gy});
+  for(const k in gates){const g=gates[k];statics.push({kind:'gate',o:g,gx:g.i,gy:g.j,d:g.i+g.j});}
 }
 let miniBase=null;
 function buildMini(){
@@ -568,6 +597,7 @@ function solidAt(i,j){
   const s=SOLID[idx(i,j)];
   if(s===0)return false;
   if(s===2)return !!barrs[i+','+j];
+  if(s===7||s===6){const g=gates[i+','+j];return g?!g.open:false;}
   return true;
 }
 function collideTiles(e){
@@ -784,6 +814,63 @@ function rollLoot(kind,bt){
   }
   msg('Nada útil aquí…');
 }
+/* ── Puertas y escaparates ──
+   Tres formas de entrar, con precios distintos: abrir lo que no está
+   cerrado (gratis), hacer palanca (silencioso, necesitas 🗝️) o entrar a
+   golpes / romper el cristal (rápido pero MUCHO ruido). */
+function nearGate(){
+  let best=null,bd=1.6;
+  for(const k in gates){const g=gates[k];
+    const d=hyp(g.i+.5-player.gx,g.j+.5-player.gy);
+    if(d<bd){bd=d;best=g;}}
+  return best;
+}
+function gateLabel(g){
+  if(g.kind==='glass')return g.open?'escaparate roto':'romper escaparate';
+  if(g.open)return 'cerrar puerta';
+  if(!g.locked)return 'abrir puerta';
+  return player.tools.crow?'forzar con palanca':'puerta cerrada con llave';
+}
+function tryGate(){
+  const g=nearGate();if(!g)return false;
+  if(g.kind==='glass'){
+    if(g.open)return false;                          // ya está roto: se cruza
+    msg('El cristal no cede a mano — rómpelo a golpes 🗡️',true);return true;
+  }
+  if(g.open){g.open=false;msg('🚪 Cerraste la puerta');sfx(220,.09,'square',.04);return true;}
+  if(!g.locked){g.open=true;msg('🚪 Abriste la puerta');sfx(300,.08,'square',.04);return true;}
+  if(player.tools.crow){                             // palanca: limpio y callado
+    g.locked=false;g.open=true;gainXP('carp',20);
+    msg('🗝️ Hiciste palanca — la puerta cedió sin ruido');
+    sfx(160,.16,'square',.045);noise(player.gx,player.gy,3);return true;
+  }
+  msg('🔒 Cerrada con llave — busca una 🗝️ palanca o tírala a golpes',true);
+  sfx(120,.12,'square',.04);return true;
+}
+// Golpear una puerta/escaparate con el arma equipada.
+function bashGate(w){
+  const ti=Math.floor(player.gx+Math.cos(player.dir)*1.05),
+        tj=Math.floor(player.gy+Math.sin(player.dir)*1.05);
+  if(ti<0||tj<0||ti>=MW||tj>=MH)return false;
+  const g=gates[ti+','+tj];
+  if(!g||g.open)return false;
+  g.hp-=w.dmg*(player.tools.crow?1.6:1);
+  shake=Math.max(shake,3);
+  if(g.kind==='glass'){
+    sfx(900,.1,'triangle',.05);
+    if(g.hp<=0){g.open=true;
+      msg('🔨 ¡Reventaste el escaparate! (el estruendo se oyó lejos)',true);
+      sfx(1200,.4,'triangle',.08);noise(player.gx,player.gy,22);gainXP('str',12);}
+    else{dmgText(g.i+.5,g.j+.5,'💥');noise(player.gx,player.gy,12);}
+  }else{
+    sfx(90,.12,'square',.06);
+    if(g.hp<=0){g.open=true;g.locked=false;
+      msg('🔨 Tiraste la puerta abajo (ruidoso…)',true);
+      sfx(70,.4,'sawtooth',.07,40);noise(player.gx,player.gy,16);gainXP('str',15);}
+    else{dmgText(g.i+.5,g.j+.5,'🔨');noise(player.gx,player.gy,9);}
+  }
+  return true;
+}
 function tryLoot(){
   if(inCar)return;
   const nl=nearLoot();if(!nl)return;
@@ -855,6 +942,7 @@ function attack(){
     }
   }
   let hitHard=false;
+  if(!hit){hitHard=bashGate(w);hit=hitHard;}          // puertas y escaparates: con o sin arma
   if(!hit&&player.wTier>=1){hitHard=chopTree(w)||dismantleFurniture(w);hit=hitHard;}
   if(hit){freeze=.045;shake=Math.max(shake,3);vib(18);wearWeapon(hitHard?1:0);}
   noise(player.gx,player.gy,2.5);
@@ -912,7 +1000,7 @@ function saveGame(){
   try{
     const s={v:SAVE_VER,
       floor:u8b64(FLOOR),solid:u8b64(SOLID),whue:u8b64(WHUE),
-      buildings,furns,crates,cars,treesL,props,fires,barrs,zombies,player,
+      buildings,furns,crates,cars,treesL,props,fires,barrs,gates,zombies,player,
       inCar:inCar?cars.indexOf(inCar):-1,
       gameTime,kills,radioFound,won,prevNight,groanT,spawnT,winT,engineT,weather};
     localStorage.setItem(SAVE_KEY,JSON.stringify(s));
@@ -925,7 +1013,8 @@ function loadGame(){
   try{
     FLOOR=b64u8(s.floor);SOLID=b64u8(s.solid);WHUE=b64u8(s.whue);
     buildings=s.buildings;furns=s.furns;crates=s.crates;cars=s.cars;
-    treesL=s.treesL;props=s.props||[];fires=s.fires||[];barrs=s.barrs||{};zombies=s.zombies||[];
+    treesL=s.treesL;props=s.props||[];fires=s.fires||[];barrs=s.barrs||{};
+    gates=s.gates||{};zombies=s.zombies||[];
     player=s.player;
     if(!player.inv)player.inv={food:0,water:0,med:0,anti:0};
     if(!player.skills)player.skills={carp:0,mech:0,elec:0,med:0,str:0};
@@ -1057,6 +1146,8 @@ function update(dt){
       z.dir=Math.atan2(dy,dx);
       const bt=barricadeAhead(z);
       if(bt){if(z.cd<=0){z.cd=1.05;hitBarr(bt,z);}continue;}
+      const gt=gateAhead(z);                        // una puerta cerrada no los detiene para siempre
+      if(gt){if(z.cd<=0){z.cd=1.2;hitGate(gt,z);}continue;}
       z.gx+=dx/d*z.sp*dt;z.gy+=dy/d*z.sp*dt;
       if(!inCar&&d<player.r+z.r+.15&&z.cd<=0){
         z.cd=.9;
@@ -1151,8 +1242,12 @@ function updateHUD(day,night){
   DOM.dHour.textContent=
     String(Math.floor(hour)).padStart(2,'0')+':'+String(Math.floor(hour%1*60)).padStart(2,'0');
   DOM.dIcon.textContent=night?'🌙':'☀️';
+  const ng=inCar?null:nearGate();
   const nl=inCar?null:nearLoot();
-  if(nl){DOM.hint.style.display='block';
+  if(ng&&!(ng.kind==='glass'&&ng.open)){
+    DOM.hint.style.display='block';
+    DOM.hint.textContent=(TOUCH?'📦 ':'E — ')+gateLabel(ng).toUpperCase();}
+  else if(nl){DOM.hint.style.display='block';
     DOM.hint.textContent=(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
   else DOM.hint.style.display='none';
   DOM.btnLoot.classList.toggle('on',!!nl);
@@ -1330,7 +1425,7 @@ function drawRoof(b){
 const WTHK=0.32;
 function drawWall(st,night){
   const i=st.gx,j=st.gy,c=HUES[st.hue],cols=[c[0],c[1],c[2]];
-  const isW=(a,b)=>{if(a<0||b<0||a>=MW||b>=MH)return false;const s=SOLID[idx(a,b)];return s===1||s===2||s===5;};
+  const isW=(a,b)=>{if(a<0||b<0||a>=MW||b>=MH)return false;const s=SOLID[idx(a,b)];return s===1||s===2||s===5||s===6||s===7;};
   const hor=isW(i-1,j)||isW(i+1,j),ver=isW(i,j-1)||isW(i,j+1);
   const segs=[];
   if(hor)segs.push([i,j+.5-WTHK/2,i+1,j+.5+WTHK/2]);        // panel E-O
@@ -1352,6 +1447,75 @@ function drawWall(st,night){
     if(barrs[i+','+j]){ctx.strokeStyle='#5c4426';ctx.lineWidth=2.6;
       ctx.beginPath();ctx.moveTo(sx-6,sy-WALLH*.55);ctx.lineTo(sx+6,sy-WALLH*.5);ctx.stroke();
       ctx.beginPath();ctx.moveTo(sx-6,sy-WALLH*.4);ctx.lineTo(sx+6,sy-WALLH*.35);ctx.stroke();}
+  }
+}
+// Puertas y escaparates. La puerta abierta se aparta contra el marco; el
+// escaparate roto deja el marco con esquirlas de cristal.
+function drawGate(g,night){
+  const hue=WHUE[idx(g.i,g.j)],c=HUES[hue];
+  const isW=(a,b)=>{if(a<0||b<0||a>=MW||b>=MH)return false;
+    const s=SOLID[idx(a,b)];return s===1||s===2||s===5||s===6||s===7;};
+  const ver=isW(g.i,g.j-1)||isW(g.i,g.j+1);        // orientación del hueco
+  const T=WTHK/2;
+  // jambas: el marco siempre está
+  if(ver){boxIso(g.i+.5-T,g.j,g.i+.5+T,g.j+.12,0,WALLH,[c[0],c[1],c[2]]);
+          boxIso(g.i+.5-T,g.j+.88,g.i+.5+T,g.j+1,0,WALLH,[c[0],c[1],c[2]]);}
+  else   {boxIso(g.i,g.j+.5-T,g.i+.12,g.j+.5+T,0,WALLH,[c[0],c[1],c[2]]);
+          boxIso(g.i+.88,g.j+.5-T,g.i+1,g.j+.5+T,0,WALLH,[c[0],c[1],c[2]]);}
+  // dintel sobre el hueco
+  if(ver)boxIso(g.i+.5-T,g.j+.1,g.i+.5+T,g.j+.9,WALLH-8,8,[c[0],c[1],c[2]]);
+  else   boxIso(g.i+.1,g.j+.5-T,g.i+.9,g.j+.5+T,WALLH-8,8,[c[0],c[1],c[2]]);
+
+  if(g.kind==='glass'){
+    const sx=g2sx(g.i+.5,g.j+.5),sy=g2sy(g.i+.5,g.j+.5);
+    if(!g.open){                                    // cristal entero
+      const a0=ver?[g.i+.5-T,g.j+.12,g.i+.5+T,g.j+.88]:[g.i+.12,g.j+.5-T,g.i+.88,g.j+.5+T];
+      ctx.globalAlpha=.42;
+      boxIso(a0[0],a0[1],a0[2],a0[3],2,WALLH-10,['#9fc4d8','#7ea6bc','#b8dcec']);
+      ctx.globalAlpha=1;
+      ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=1.4;
+      ctx.beginPath();ctx.moveTo(sx-7,sy-WALLH+8);ctx.lineTo(sx+2,sy-14);ctx.stroke();
+      if(g.hp<g.mhp){                               // grietas al golpearlo
+        ctx.strokeStyle='rgba(255,255,255,.75)';ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(sx,sy-30);ctx.lineTo(sx-6,sy-18);
+        ctx.moveTo(sx,sy-30);ctx.lineTo(sx+5,sy-16);
+        ctx.moveTo(sx,sy-30);ctx.lineTo(sx+1,sy-40);ctx.stroke();}
+    }else{                                          // roto: esquirlas en el marco
+      ctx.fillStyle='rgba(190,222,238,.55)';
+      for(let k=0;k<5;k++){const t=-6+k*3;
+        ctx.beginPath();ctx.moveTo(sx+t,sy-WALLH+9);
+        ctx.lineTo(sx+t+2.4,sy-WALLH+9);ctx.lineTo(sx+t+1.2,sy-WALLH+16+(k%2)*5);
+        ctx.closePath();ctx.fill();}
+      ctx.fillStyle='rgba(190,222,238,.4)';
+      for(let k=0;k<4;k++)ctx.fillRect(sx-8+k*5,sy-3,2.5,2);   // vidrios en el piso
+    }
+    return;
+  }
+  // puerta de madera
+  const wood=g.open?null:(g.locked?['#5a4326','#463320','#6b5130']:['#7a5c34','#5f4728','#8d6d40']);
+  if(!g.open){
+    const dm=g.hp/g.mhp,dam=dm<.6;
+    const cols=dam?wood.map(x=>shade(x,-18)):wood;
+    if(ver)boxIso(g.i+.5-T,g.j+.12,g.i+.5+T,g.j+.88,1,WALLH-6,cols);
+    else   boxIso(g.i+.12,g.j+.5-T,g.i+.88,g.j+.5+T,1,WALLH-6,cols);
+    const sx=g2sx(g.i+.5,g.j+.5),sy=g2sy(g.i+.5,g.j+.5);
+    ctx.fillStyle=g.locked?'#d9c26a':'#c9c2b0';     // manija (dorada si cerrada)
+    ctx.beginPath();ctx.arc(sx+6,sy-WALLH*.44,1.8,0,7);ctx.fill();
+    if(g.locked){                                   // cerradura visible
+      ctx.fillStyle='#3a3a30';ctx.fillRect(sx+3,sy-WALLH*.53,6,5);
+      ctx.fillStyle='#d9c26a';ctx.fillRect(sx+5,sy-WALLH*.51,2,3);}
+    ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=1;  // cuarterones
+    ctx.strokeRect(sx-7,sy-WALLH*.78,14,12);
+    ctx.strokeRect(sx-7,sy-WALLH*.38,14,12);
+    if(dam){ctx.strokeStyle='rgba(20,14,8,.7)';ctx.lineWidth=1.6;   // astillada
+      ctx.beginPath();ctx.moveTo(sx-5,sy-30);ctx.lineTo(sx+3,sy-14);
+      ctx.moveTo(sx+2,sy-34);ctx.lineTo(sx-2,sy-18);ctx.stroke();}
+    if(g.hp<g.mhp){ctx.fillStyle='#151a10';ctx.fillRect(sx-12,sy-WALLH-9,24,3);
+      ctx.fillStyle='#d9c26a';ctx.fillRect(sx-12,sy-WALLH-9,24*dm,3);}
+  }else{                                            // abierta: pegada a la jamba
+    const o=['#7a5c34','#5f4728','#8d6d40'];
+    if(ver)boxIso(g.i+.5-T,g.j+.12,g.i+.5+T*3.2,g.j+.3,1,WALLH-6,o);
+    else   boxIso(g.i+.12,g.j+.5-T,g.i+.3,g.j+.5+T*3.2,1,WALLH-6,o);
   }
 }
 /* ── Muebles como OBJETOS REALES ──
@@ -1909,6 +2073,7 @@ function draw(){
     }else if(it.kind==='furn')drawFurn(it);
     else if(it.kind==='crate')drawCrate(it);
     else if(it.kind==='prop')drawProp(it.o,it._sx,it._sy,night);
+    else if(it.kind==='gate')drawGate(it.o,night);
     else if(it.kind==='carD')drawCar(it.o);
     else if(it.kind==='fire')drawFire(it.o,it._sx,it._sy);
     else if(it.kind==='roof')drawRoof(it.o);
@@ -2132,7 +2297,7 @@ addEventListener('keydown',e=>{
   if(k==='i'&&started&&!dead&&!paused){toggleInv();return;}
   if(!player||paused||crafting||skillsOpen||invOpen||!started)return;
   if(k===' ')atkHold=true;
-  if(k==='e')tryLoot();
+  if(k==='e'){if(!tryGate())tryLoot();}
   if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
   if(k==='1')useItem('food');
   if(k==='2')useItem('water');
@@ -2185,7 +2350,7 @@ function bindTap(id,fn){
   el.addEventListener('touchstart',e=>{e.preventDefault();e.stopPropagation();fn();},{passive:false});
   el.addEventListener('mousedown',e=>{e.preventDefault();fn();});
 }
-bindTap('btnLoot',tryLoot);
+bindTap('btnLoot',()=>{if(!tryGate())tryLoot();});
 bindTap('btnCraft',toggleCraft);
 bindTap('btnGun',()=>{if(player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}});
 bindTap('btnCar',enterExitCar);
@@ -2293,11 +2458,12 @@ function tryBuild(){
   const k=bKey(sp.i,sp.j);
   if(barrs[k]){
     delete barrs[k];player.wood++;
-    if(!sp.win)SOLID[idx(sp.i,sp.j)]=0;
+    if(!sp.win)SOLID[idx(sp.i,sp.j)]=gates[k]?7:0;   // bajo la barricada sigue la puerta
     msg('Quitaste la barricada (+1 🪵)');sfx(180,.12,'square',.04);return;}
   if(player.wood<2){msg('Necesitas 2 tablones 🪵 (tala árboles con el hacha)',true);return;}
   player.wood-=2;gainXP('carp',10);
   const bh=barrHP();barrs[k]={gx:sp.i,gy:sp.j,hp:bh,mhp:bh,win:sp.win};
+  if(gates[k]){gates[k].open=false;}                 // se tapia con la puerta cerrada
   if(!sp.win)SOLID[idx(sp.i,sp.j)]=5;
   msg(sp.win?'🔨 Ventana tapiada':'🔨 Puerta tapiada');
   sfx(220,.07,'square',.05);sfx(260,.07,'square',.05);
@@ -2311,13 +2477,29 @@ function barricadeAhead(z){
   if(sc===2&&barrs[bKey(ti,tj)])return barrs[bKey(ti,tj)];
   return null;
 }
+// Los zombis empujan y astillan las puertas cerradas que les cierran el paso.
+function gateAhead(z){
+  const ti=Math.floor(z.gx+Math.cos(z.dir)*.75),
+        tj=Math.floor(z.gy+Math.sin(z.dir)*.75);
+  if(ti<0||tj<0||ti>=MW||tj>=MH)return null;
+  const g=gates[ti+','+tj];
+  return (g&&!g.open)?g:null;
+}
+function hitGate(g,z){
+  g.hp-=rand(4,8);
+  sfx(g.kind==='glass'?800:80,.09,g.kind==='glass'?'triangle':'square',.05);
+  if(hyp(player.gx-g.i,player.gy-g.j)<9)shake=Math.max(shake,1.5);
+  if(g.hp<=0){g.open=true;g.locked=false;
+    msg(g.kind==='glass'?'💥 ¡Reventaron el escaparate!':'💥 ¡Tiraron una puerta abajo!',true);
+    sfx(60,.3,'sawtooth',.09,35);}
+}
 function hitBarr(b,z){
   b.hp-=rand(7,13);
   sfx(95,.08,'square',.05);
   if(hyp(player.gx-b.gx,player.gy-b.gy)<9)shake=Math.max(shake,1.5);
   if(b.hp<=0){
     delete barrs[bKey(b.gx,b.gy)];
-    if(!b.win)SOLID[idx(b.gx,b.gy)]=0;
+    if(!b.win)SOLID[idx(b.gx,b.gy)]=gates[bKey(b.gx,b.gy)]?7:0;
     msg('💥 ¡Rompieron una barricada!',true);
     sfx(60,.3,'sawtooth',.09,35);
   }
