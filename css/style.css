@@ -101,7 +101,11 @@ body.touch #cv{cursor:default}
 .screen{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
   background:rgba(6,8,5,.92)}
 .panel{max-width:440px;width:calc(100% - 36px);border:1px solid #39442e;background:#11150d;
-  padding:26px 24px;text-align:center;border-radius:4px}
+  padding:26px 24px;text-align:center;border-radius:4px;
+  /* la pantalla de inicio crecio con el tiempo: si no cabe, que se pueda
+     desplazar, o en un movil los botones de abajo quedan inalcanzables */
+  max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow-y:auto;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 h1{font-size:30px;letter-spacing:5px;color:#c8d3b0;margin-bottom:2px}
 h1 em{font-style:normal;color:#a31621}
 .tag{font-size:13px;color:#7d8a68;letter-spacing:2px;margin-bottom:16px}

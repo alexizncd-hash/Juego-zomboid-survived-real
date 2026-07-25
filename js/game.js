@@ -27,7 +27,7 @@ const DOM={
 };
 for(const k of ['food','water','med','anti'])DOM.slotN[k]=DOM.slots[k].querySelector('.n');
 for(const id of ['mHun','mThi','mTir','mHer','mInf','mPan','mSue',
-  'mFri','mCal','mAbu','mPes'])DOM.moodle[id]=$(id);
+  'mFri','mCal','mAbu','mPes','mSan','mFra','mQue'])DOM.moodle[id]=$(id);
 
 let VW,VH,DPR=1;
 // Retina/alta densidad: canvas físico a DPR (tope 2 por rendimiento),
@@ -65,9 +65,12 @@ const MELEE=[
   {n:'Puños',dmg:12,range:.95,arc:1.9,cd:.32,dur:0},          // los puños no se rompen
   {n:'Tabla con clavos',dmg:20,range:1.05,arc:1.9,cd:.36,dur:45},
   {n:'Bate de béisbol',dmg:32,range:1.15,arc:2.0,cd:.42,dur:75},
-  {n:'Hacha de bombero',dmg:48,range:1.25,arc:2.1,cd:.5,dur:120}
+  {n:'Hacha de bombero',dmg:48,range:1.25,arc:2.1,cd:.5,dur:120},
+  {n:'Machete',dmg:42,range:1.2,arc:2.2,cd:.36,dur:100}   // menos golpe, mucho más rápido
 ];
 const GUN={n:'Pistola 9mm',dmg:34,cd:.27,range:11,noise:14};
+// Escopeta: cono corto, brutal de cerca, y un estruendo que se oye lejísimos.
+const SHOT={n:'Escopeta',dmg:19,pellets:6,cd:.85,range:6.5,spread:.3,noise:26};
 
 /* ================= CONFIG / BALANCE ================= */
 // Todas las constantes ajustables del juego en un solo lugar.
@@ -107,7 +110,10 @@ const CFG={
   sneakSpeed:1.9,          // velocidad agachado
   sneakHide:.45,           // cuánto te oculta ir agachado
   runLoud:1.5,             // correr te delata
-  lampLoud:1.35            // la lámpara encendida te hace visible de noche
+  lampLoud:1.35,           // la lámpara encendida te hace visible de noche
+  // heridas
+  bleedDmg:2.6, bleedHeal:.35, burnDmg:2.2,
+  fractureSlow:.62         // cuánto te frena una fractura
 };
 
 function vib(ms){try{if(navigator.vibrate)navigator.vibrate(ms);}catch(e){}}
@@ -167,6 +173,29 @@ const TOOLS={hammer:{ic:'🔨',n:'Martillo'},saw:{ic:'🪚',n:'Serrucho'},
   crow:{ic:'🗝️',n:'Palanca'}};
 // Equipo que se lleva puesto (no se gasta como material).
 const GEAR={pack:{ic:'🎒',n:'Mochila'},helmet:{ic:'⛑️',n:'Casco de minero'}};
+// Ropa por partes: abriga (temperatura) y protege (daño y mordidas).
+const WEAR={
+  chamarra:{slot:'torso',ic:'🧥',n:'Chamarra',warm:16,prot:5},
+  abrigo  :{slot:'torso',ic:'🧥',n:'Abrigo grueso',warm:28,prot:3},
+  botas   :{slot:'pies', ic:'🥾',n:'Botas',warm:6, prot:4},
+  guantes :{slot:'manos',ic:'🧤',n:'Guantes',warm:4, prot:5},
+  gorro   :{slot:'cabeza',ic:'🧢',n:'Gorro',warm:9, prot:2}
+};
+const WEAR_SLOTS=['torso','pies','manos','cabeza'];
+function clothWarm(){let w=0;for(const s of WEAR_SLOTS){const it=player.wear&&player.wear[s];
+  if(it&&WEAR[it])w+=WEAR[it].warm;}return w;}
+function clothProt(){let p=0;for(const s of WEAR_SLOTS){const it=player.wear&&player.wear[s];
+  if(it&&WEAR[it])p+=WEAR[it].prot;}return p;}
+// Ponerse una prenda: si ya llevas algo en esa parte, se cambia por lo mejor.
+function wearItem(id){
+  const W=WEAR[id];if(!W)return false;
+  const cur=player.wear[W.slot];
+  if(cur&&(WEAR[cur].warm+WEAR[cur].prot)>=(W.warm+W.prot)){
+    player.cloth++;msg(W.ic+' '+W.n+' de sobra → +1 🧵');return true;}
+  player.wear[W.slot]=id;
+  msg(W.ic+' Te pusiste: '+W.n+' (abrigo +'+W.warm+' · protección +'+W.prot+')');
+  sfx(380,.14,'triangle',.05);return true;
+}
 
 // Roles de cuarto → paleta de muebles coherente para cada uno.
 const ROLE_FURN={
@@ -580,6 +609,8 @@ function init(){
     tools:{hammer:false,saw:false,screw:false,wrench:false,crow:false},
     pack:false,helmet:false,helmOn:false,batt:0,battT:0,carKeys:0,
     temp:50,panic:0,bored:0,rawAge:0,dirtyWater:0,sneak:false,
+    wear:{torso:null,pies:null,manos:null,cabeza:null},
+    wounds:{bleed:0,fracture:0,burn:0},hasShotgun:false,shells:0,gunMode:0,
     inv:{food:1,water:1,med:0,anti:0}};
   fires=[];crafting=false;skillsOpen=false;invOpen=false;
   DOM.craft.style.display='none';DOM.skills.style.display='none';DOM.inv.style.display='none';
@@ -756,6 +787,49 @@ function helmetTick(dt){
     else msg('🔋 Pila gastada — quedan '+player.batt);
   }
 }
+/* ── Heridas concretas ──
+   Ya no todo es "perder vida": cada herida tiene su causa, su efecto y su
+   cura propia, así que llevar vendas o una férula importa de verdad. */
+function hurt(kind,amt){
+  const w=player.wounds;if(!w)return;
+  w[kind]=Math.min(100,(w[kind]||0)+amt);
+  if(kind==='bleed'&&w.bleed>=amt)msg('🩸 ¡Estás sangrando! Usa vendas (3)',true);
+  if(kind==='fracture')msg('🦴 ¡Te fracturaste! Necesitas una férula',true);
+  if(kind==='burn')msg('🔥 ¡Te quemaste!',true);
+  flashT=Math.max(flashT,.3);vib(35);
+}
+const bleeding =()=>player.wounds&&player.wounds.bleed>0;
+const fractured=()=>player.wounds&&player.wounds.fracture>0;
+const burned   =()=>player.wounds&&player.wounds.burn>0;
+function woundTick(dt){
+  const w=player.wounds;if(!w)return;
+  if(w.bleed>0){                                   // el sangrado desangra
+    player.hp-=CFG.bleedDmg*dt*(w.bleed/60);
+    w.bleed=Math.max(0,w.bleed-CFG.bleedHeal*dt);  // coagula muy despacio solo
+  }
+  if(w.burn>0){player.hp-=CFG.burnDmg*dt*(w.burn/100);
+    w.burn=Math.max(0,w.burn-1.6*dt);}
+  // la fractura NO se cura sola: hace falta una férula
+  if(w.bleed>0&&Math.random()<dt*1.4)blood(player.gx,player.gy,1);
+}
+// Quemarte al pisar una fogata, y cortarte al cruzar un escaparate roto.
+function hazardTick(dt){
+  for(const f of fires)if(!f.gen&&hyp(f.gx-player.gx,f.gy-player.gy)<.75){
+    if((player._burnCd=(player._burnCd||0)-dt)<=0){player._burnCd=1.2;
+      player.hp-=4;hurt('burn',22);}
+    break;
+  }
+  const i=Math.floor(player.gx),j=Math.floor(player.gy);
+  if(i>=0&&j>=0&&i<MW&&j<MH&&SOLID[idx(i,j)]===6){   // marco con cristales rotos
+    const g=gates[i+','+j];
+    if(g&&g.open&&(player._cutCd=(player._cutCd||0)-dt)<=0){
+      player._cutCd=2.5;
+      if(!clothProt()||Math.random()<.6){
+        player.hp-=3;hurt('bleed',18);
+        msg('🩸 Te cortaste con los cristales del escaparate',true);}
+    }
+  }
+}
 /* ── Estado del cuerpo: temperatura, pánico, aburrimiento y carga ──
    Cada uno tiene un efecto REAL sobre cómo juegas, no es solo un icono. */
 // Peso que llevas encima; la mochila sube cuánto aguantas sin penalización.
@@ -785,6 +859,7 @@ function bodyTick(dt,night,close){
   if(indoors())target+=14;                         // bajo techo se aguanta
   if(inCar)target+=8;
   if(nearWarmth())target+=34;
+  target+=clothWarm();                             // lo que llevas puesto abriga
   if(!night&&!raining())target+=6;
   const rate=(target>p.temp)?CFG.warmRate:CFG.coldRate;
   p.temp=clamp(p.temp+Math.sign(target-p.temp)*Math.min(rate*dt,Math.abs(target-p.temp)),0,100);
@@ -940,6 +1015,19 @@ const LOOT_DEF={
     player.helmet=true;player.helmOn=true;player.batt+=2;
     msg('⛑️ ¡Casco de minero! Lámpara manos libres (L) · +2 🔋');return true;}},
   arma3:   {rare:1,fn:()=>giveWeapon(3,'¡Un hallazgo!')},
+  machete: {rare:1,fn:()=>giveWeapon(4,'¡Un machete!')},
+  escopeta:{rare:1,fn:()=>{if(!player.hasShotgun){player.hasShotgun=true;player.gunMode=2;
+    player.useGun=true;player.shells+=6;
+    msg('💥 ¡UNA ESCOPETA! (+6 cartuchos) — brutal de cerca, se oye lejísimos');
+    sfx(90,.3,'sawtooth',.09,45);return true;}
+    player.shells+=4;msg('💥 Cartuchos (+4)');return true;}},
+  cartuchos:{fn:()=>{if(!player.hasShotgun)return false;
+    player.shells+=4;msg('💥 Cartuchos (+4)');return true;}},
+  chamarra:{fn:()=>wearItem('chamarra')},
+  abrigo:  {rare:1,fn:()=>wearItem('abrigo')},
+  botas:   {fn:()=>wearItem('botas')},
+  guantes: {fn:()=>wearItem('guantes')},
+  gorro:   {fn:()=>wearItem('gorro')},
   chaleco: {rare:1,fn:()=>{if(player.armor>50)return false;
     player.armor=100;msg('🦺 ¡Chaleco antibalas! (100)');return true;}},
   morfina: {rare:1,fn:()=>{player.hp=clamp(player.hp+45,0,100);
@@ -952,13 +1040,15 @@ const LOOT_DEF={
 const FURN_LOOT={
   nevera:   {food:30,cruda:26,agua:20,alcohol:6,nada:14},
   alacena:  {food:26,agua:18,vendas:10,anti:8,madera:12,alcohol:8,balas:8,radio:5,pilas:6,nada:10},
-  ropero:   {tela:30,vendas:12,anti:8,arma1:10,arma2:5,libro:6,mochila:4,llaves:4,nada:20},
-  cama:     {tela:26,vendas:20,anti:4,nada:44},
+  ropero:   {tela:26,vendas:10,anti:8,arma1:9,arma2:5,libro:6,mochila:4,llaves:4,
+             chamarra:12,botas:9,guantes:8,gorro:8,abrigo:3,nada:16},
+  cama:     {tela:26,vendas:20,anti:4,gorro:5,nada:40},
   mesa:     {food:20,chatarra:20,balas:12,libro:5,radio:6,llaves:5,pilas:5,nada:32},
   estante:  {food:26,agua:22,madera:16,chatarra:14,libro:5,pilas:6,nada:14},
   camilla:  {vendas:30,anti:20,alcohol:18,tela:16,nada:12},
   botiquin: {vendas:34,anti:32,alcohol:20,nada:10},
-  casillero:{balas:18,chatarra:18,arma2:10,pistola:8,herram:8,tela:8,radio:6,pilas:6,llaves:5,mochila:4,nada:20},
+  casillero:{balas:18,chatarra:16,arma2:10,pistola:8,herram:8,tela:6,radio:6,pilas:6,
+             llaves:5,mochila:4,botas:7,guantes:6,cartuchos:6,nada:18},
   herramienta:{herram:34,chatarra:22,madera:18,llave:12,palanca:12,pilas:8,casco:5,nada:10},
   vitrina:  {alcohol:16,vendas:14,anti:12,chatarra:12,arma1:8,nada:28},
   bomba:    {gas:72,nada:28},
@@ -974,20 +1064,23 @@ const FURN_LOOT={
 };
 // Pesos EXTRA que aporta el edificio (el cruce edificio × mueble).
 const BLD_LOOT={
-  ferreteria: {herram:30,madera:26,chatarra:24,llave:10,palanca:14,pilas:14,casco:6,arma3:4},
+  ferreteria: {herram:30,madera:26,chatarra:24,llave:10,palanca:14,pilas:14,casco:6,
+               arma3:4,machete:5,guantes:8,botas:6},
   farmacia:   {anti:34,vendas:30,alcohol:18,morfina:3},
   hospital:   {vendas:30,anti:26,alcohol:14,morfina:4,libro:4},
-  comisaria:  {balas:22,pistola:14,cajabalas:10,arma2:10,arma3:4,chaleco:5,palanca:8,llaves:6,mochila:5},
-  carcel:     {chatarra:20,balas:14,arma2:12,arma3:3,herram:10,chaleco:3},
-  tienda:     {food:30,agua:26,alcohol:8,pilas:12,mochila:4},
-  bodega:     {food:34,agua:30,madera:14,palanca:6,casco:3},
-  taller_mec: {chatarra:24,gas:26,llave:18,herram:10,palanca:10,llaves:10,casco:4},
+  comisaria:  {balas:20,pistola:12,cajabalas:10,arma2:10,arma3:4,chaleco:5,palanca:8,
+               llaves:6,mochila:5,escopeta:5,cartuchos:12,botas:8,guantes:6},
+  carcel:     {chatarra:20,balas:14,arma2:12,arma3:3,herram:10,chaleco:3,
+               escopeta:3,cartuchos:8,botas:6},
+  tienda:     {food:28,agua:24,alcohol:8,pilas:12,mochila:4,chamarra:8,gorro:8,botas:6},
+  bodega:     {food:34,agua:30,madera:14,palanca:6,casco:3,machete:3,botas:5},
+  taller_mec: {chatarra:24,gas:26,llave:18,herram:10,palanca:10,llaves:10,casco:4,guantes:8},
   bar:        {alcohol:30,food:18,agua:14,arma2:8},
   restaurante:{food:30,cruda:16,agua:14,alcohol:12},
   escuela:    {libro:22,vendas:12,food:12,agua:12,mochila:8,pilas:8},
   oficina:    {chatarra:22,food:10,agua:10,radio:6,pilas:10,llaves:5},
-  iglesia:    {tela:22,food:16,vendas:10},
-  barberia:   {tela:26,alcohol:20,arma1:8},
+  iglesia:    {tela:22,food:16,vendas:10,abrigo:2,gorro:5},
+  barberia:   {tela:26,alcohol:20,arma1:8,gorro:6},
   gasolinera: {gas:24,food:12,agua:12,chatarra:10}
   // casa: sin extras — usa la tabla del mueble tal cual (cocina, recámara…)
 };
@@ -1088,7 +1181,12 @@ function useItem(k,silent){
   if(k==='food'){player.food=clamp(player.food+45,0,100);if(!silent)msg('🍖 Comiste (+45)');}
   if(k==='water'){player.water=clamp(player.water+45,0,100);if(!silent)msg('💧 Bebiste (+45)');}
   if(k==='med'){const heal=Math.round(40*(1+sk('med')*.12));   // 💊 medicina: +12%/nivel
-    player.hp=clamp(player.hp+heal,0,100);if(!silent){msg('🩹 Te curaste (+'+heal+')');gainXP('med',18);}}
+    player.hp=clamp(player.hp+heal,0,100);
+    const w=player.wounds;
+    let extra='';
+    if(w&&w.bleed>0){w.bleed=0;extra=' · sangrado cortado';}   // vendar detiene la hemorragia
+    if(w&&w.burn>0){w.burn=Math.max(0,w.burn-50);extra+=' · quemadura tratada';}
+    if(!silent){msg('🩹 Te curaste (+'+heal+')'+extra);gainXP('med',18);}}
   sfx(560,.12,'sine',.05);
 }
 
@@ -1117,7 +1215,8 @@ function autoAim(maxD){
 }
 function attack(){
   if(player.cd>0||dead||inCar||player.sleeping||crafting||skillsOpen||invOpen)return;
-  if(player.useGun&&player.hasGun){shoot();return;}
+  if(player.gunMode===1&&player.hasGun){shoot();return;}
+  if(player.gunMode===2&&player.hasShotgun){shootShell();return;}
   const w=MELEE[player.wTier];
   if(TOUCH)autoAim(w.range+2.2);
   player.cd=w.cd*(panicky()?1.2:1);player.swing=.18;   // con pánico golpeas peor
@@ -1169,6 +1268,53 @@ function shoot(){
   shake=Math.max(shake,4);vib(22);
   noise(player.gx,player.gy,GUN.noise);
   sfx(160,.14,'square',.1,60);sfx(1200,.05,'sawtooth',.04);
+}
+// Q recorre solo las armas que de verdad llevas encima.
+function cycleWeapon(){
+  const modos=[0];
+  if(player.hasGun)modos.push(1);
+  if(player.hasShotgun)modos.push(2);
+  if(modos.length===1){msg('Solo llevas arma blanca');return;}
+  const i=modos.indexOf(player.gunMode);
+  player.gunMode=modos[(i+1)%modos.length];
+  player.useGun=player.gunMode>0;                  // compatibilidad con el HUD
+  msg(player.gunMode===0?('🗡️ '+MELEE[player.wTier].n)
+     :player.gunMode===1?('🔫 '+GUN.n+' ('+player.ammo+')')
+     :('💥 '+SHOT.n+' ('+player.shells+')'));
+  sfx(340,.07,'triangle',.04);
+}
+function shootShell(){
+  if(inCar||player.sleeping)return;
+  if(player.shells<=0){msg('Sin cartuchos — Q para cambiar de arma',true);
+    sfx(700,.06,'square',.03);player.cd=.3;return;}
+  player.shells--;player.cd=SHOT.cd;player.gunFlash=.12;
+  if(TOUCH)autoAim(SHOT.range);
+  const base=player.dir,sp=SHOT.spread*(1+player.panic/140);
+  let tocados=0;
+  for(let k=0;k<SHOT.pellets;k++){
+    const a=base+rand(-sp,sp),cx=Math.cos(a),sy2=Math.sin(a);
+    let bestT=SHOT.range,hitZ=null;
+    for(const z of zombies){
+      const rx=z.gx-player.gx,ry=z.gy-player.gy,t=rx*cx+ry*sy2;
+      if(t>0&&t<bestT){
+        const px=player.gx+cx*t,py=player.gy+sy2*t;
+        if(hyp(z.gx-px,z.gy-py)<z.r+.14){bestT=t;hitZ=z;}
+      }
+    }
+    shots.push({x1:player.gx+cx*.5,y1:player.gy+sy2*.5,
+      x2:player.gx+cx*bestT,y2:player.gy+sy2*bestT,life:.06});
+    if(hitZ){                                      // más daño cuanto más cerca
+      const cerca=1-Math.min(1,bestT/SHOT.range)*.55;
+      const dm=Math.round(SHOT.dmg*cerca);
+      hitZ.hp-=dm;hitZ.flash=.14;hitZ.stun=.3;hitZ.forced=8;
+      blood(hitZ.gx,hitZ.gy,5);tocados+=dm;
+    }
+  }
+  if(tocados>0){dmgText(player.gx+Math.cos(base)*1.4,player.gy+Math.sin(base)*1.4,
+    tocados,'#ffd27a');freeze=.05;}
+  shake=Math.max(shake,7);vib(45);
+  noise(player.gx,player.gy,SHOT.noise);           // el estruendo llama a medio pueblo
+  sfx(90,.3,'sawtooth',.12,45);sfx(1400,.07,'square',.05);
 }
 /* ================= RÉCORDS (localStorage) ================= */
 const REC_KEY='zonaCero.records';
@@ -1232,6 +1378,10 @@ function loadGame(){
     if(player.rawAge===undefined)player.rawAge=0;
     if(player.dirtyWater===undefined)player.dirtyWater=0;
     if(player.sneak===undefined)player.sneak=false;
+    if(!player.wear)player.wear={torso:null,pies:null,manos:null,cabeza:null};
+    if(!player.wounds)player.wounds={bleed:0,fracture:0,burn:0};
+    if(player.hasShotgun===undefined){player.hasShotgun=false;player.shells=0;}
+    if(player.gunMode===undefined)player.gunMode=0;
     for(const c of cars){                            // partes añadidas en v6
       if(c.tires===undefined)c.tires=irand(25,101);
       if(c.engine===undefined)c.engine=irand(30,101);
@@ -1383,7 +1533,8 @@ function update(dt){
   if(player.water<=0)player.hp-=CFG.thirstDmg*dt;
   if(player.infected)player.hp-=CFG.infectDmg*dt;
   if(player.hp<=0&&!dead){
-    die(player.infected?'La infección':player.water<=0?'La sed':
+    die(player.wounds&&player.wounds.bleed>0?'La hemorragia':
+      player.infected?'La infección':player.water<=0?'La sed':
       player.temp<12?'El frío':'El hambre');return;}
 
   if(inCar){driveCar(dt);}
@@ -1406,6 +1557,7 @@ function update(dt){
   if(player.slp<25)maxSp*=CFG.sleepySlow;
   if(cold())maxSp*=.85;                              // aterido: te mueves peor
   if(over)maxSp*=.8;                                 // cargado hasta arriba
+  if(fractured())maxSp*=CFG.fractureSlow;            // cojeando
   if(player.sneak){maxSp=Math.min(maxSp,CFG.sneakSpeed);   // agachado vas despacio
     player.sta=clamp(player.sta+CFG.staRegen*.4*dt,0,100);}
   let gv={x:0,y:0};
@@ -1464,15 +1616,18 @@ function update(dt){
       if(!inCar&&dPly<player.r+z.r+.15&&z.cd<=0){
         z.cd=.9;
         let zdm=z.dmg;
+        const cp=clothProt();
+        if(cp>0)zdm=Math.max(1,Math.round(zdm*(1-Math.min(.4,cp/50))));  // la ropa amortigua
         if(player.armor>0){
           zdm=Math.max(1,Math.round(zdm*.5));
           player.armor=Math.max(0,player.armor-8);
           if(player.armor<=0)msg('🦺 Tu chaleco quedó destrozado',true);
         }
+        if(Math.random()<.35)hurt('bleed',10+irand(0,8));   // el zarpazo abre heridas
         player.hp-=zdm;flashT=.35;shake=Math.max(shake,6);vib(45);
         blood(player.gx,player.gy,4);
         dmgText(player.gx,player.gy,'-'+zdm,'#ff6b5e');
-        if(!player.infected&&Math.random()<CFG.biteChance){
+        if(!player.infected&&Math.random()<CFG.biteChance*(1-Math.min(.5,clothProt()/40))){
           player.infected=true;msg('☣️ ¡TE MORDIERON! Busca antibióticos…',true);
           sfx(200,.5,'sawtooth',.08,60);}
         sfx(60,.2,'sawtooth',.07);
@@ -1510,7 +1665,7 @@ function update(dt){
     for(const p of props)if(p.type==='dumpster'&&p.looted){p.rt-=dt;if(p.rt<=0)p.looted=false;}
   }
   utilitiesTick(day);
-  foodTick(dt);rainTick(dt);
+  foodTick(dt);rainTick(dt);woundTick(dt);hazardTick(dt);
 
   for(const p of parts){p.gx+=p.vx*dt;p.gy+=p.vy*dt;p.life-=dt;}
   parts=parts.filter(p=>p.life>0);
@@ -1534,9 +1689,9 @@ function updateHUD(day,night){
   if(inCar){DOM.wName.textContent=(isHome(inCar)?'🚚 ':'🚗 ')+'Manejando';
     DOM.ammo.textContent='⛽'+Math.max(0,Math.round(inCar.fuel))+
       ' 🛞'+Math.round(inCar.tires||0)+' ⚙️'+Math.round(inCar.engine||0);}
-  else{const usingGun=player.useGun&&player.hasGun;
-    DOM.wName.textContent=usingGun?GUN.n:MELEE[player.wTier].n;
-    DOM.ammo.textContent=usingGun?('🔸'+player.ammo)
+  else{const m=player.gunMode||0;
+    DOM.wName.textContent=m===1?GUN.n:m===2?SHOT.n:MELEE[player.wTier].n;
+    DOM.ammo.textContent=m===1?('🔸'+player.ammo):m===2?('💥'+player.shells)
       :(player.wTier>0?('🔧'+Math.round(player.wDur/player.wDurMax*100)+'%'):'');}
   DOM.rWood.textContent=player.wood;
   DOM.rGas.textContent=player.gas;
@@ -1578,8 +1733,8 @@ function updateHUD(day,night){
       :(TOUCH?'📦 ':'E — REGISTRAR ')+nl.label.toUpperCase();}
   else DOM.hint.style.display='none';
   DOM.btnLoot.classList.toggle('on',!!nl);
-  DOM.btnGun.classList.toggle('have',player.hasGun&&!inCar);
-  DOM.btnGun.classList.toggle('sel',player.useGun&&player.hasGun);
+  DOM.btnGun.classList.toggle('have',(player.hasGun||player.hasShotgun)&&!inCar);
+  DOM.btnGun.classList.toggle('sel',(player.gunMode||0)>0);
   DOM.btnCar.classList.toggle('on',!!inCar||!!nearCar());
   DOM.btnBed.classList.toggle('on',!inCar&&!!nearBed()&&player.slp<85);
   DOM.btnBuild.classList.toggle('on',!inCar&&!!nearBarrSpot());
@@ -1599,6 +1754,9 @@ function updateHUD(day,night){
   setMoodle('mCal',hot(),player.temp>92);
   setMoodle('mAbu',boredOut(),player.bored>92);
   setMoodle('mPes',overloaded(),carryWeight()>carryMax()*1.4);
+  setMoodle('mSan',bleeding(),player.wounds&&player.wounds.bleed>45);
+  setMoodle('mFra',fractured(),false);
+  setMoodle('mQue',burned(),player.wounds&&player.wounds.burn>60);
   DOM.dmg.style.opacity=flashT>0?Math.min(1,flashT*3):0;
 }
 function setMoodle(id,on,crit){
@@ -2421,7 +2579,7 @@ function draw(){
       drawHuman(it._sx,it._sy,faceOf(player.dir),{shirt:'#5d738f',pants:'#3a4250',
         hair:'#3a2e22',walk:player.walk,swingA,pack:true,
         helmet:player.helmet,lamp:helmetOn(),scale:player.sneak?.86:1,
-        wTier:player.wTier,gun:player.useGun&&player.hasGun,gunFlash:player.gunFlash});
+        wTier:player.wTier,gun:(player.gunMode||0)>0,gunFlash:player.gunFlash});
       if(player.swing>0){
         const a=grid2scrA(Math.cos(player.dir),Math.sin(player.dir));
         ctx.strokeStyle='rgba(232,228,216,'+(player.swing/.18)*.8+')';ctx.lineWidth=3;
@@ -2628,7 +2786,7 @@ addEventListener('keydown',e=>{
   if(!player||paused||crafting||skillsOpen||invOpen||!started)return;
   if(k===' ')atkHold=true;
   if(k==='e'){if(!tryGate()&&!tryBarrel()&&!tryTap())tryLoot();}
-  if(k==='q'&&player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}
+  if(k==='q')cycleWeapon();
   if(k==='1')useItem('food');
   if(k==='2')useItem('water');
   if(k==='3')useItem('med');
@@ -2687,7 +2845,7 @@ function bindTap(id,fn){
 }
 bindTap('btnLoot',()=>{if(!tryGate()&&!tryBarrel()&&!tryTap())tryLoot();});
 bindTap('btnCraft',toggleCraft);
-bindTap('btnGun',()=>{if(player.hasGun){player.useGun=!player.useGun;sfx(340,.07,'triangle',.04);}});
+bindTap('btnGun',cycleWeapon);
 bindTap('btnCar',enterExitCar);
 bindTap('btnBed',trySleep);
 bindTap('btnBuild',tryBuild);
@@ -3240,6 +3398,22 @@ function renderInv(){
   for(const t in TOOLS){const has=player.tools[t];
     h+='<div class="icell'+(has?'':' off')+'"><div class="ig">'+TOOLS[t].ic+'</div>'+
       TOOLS[t].n+'</div>';}
+  h+='</div><div class="isec">ROPA · abrigo +'+clothWarm()+' · protección +'+clothProt()+
+    '</div><div class="igrid">';
+  const SLOT_N={torso:'Torso',pies:'Pies',manos:'Manos',cabeza:'Cabeza'};
+  for(const sl of WEAR_SLOTS){const it=player.wear[sl],W=it&&WEAR[it];
+    h+='<div class="icell'+(W?'':' off')+'"><div class="ig">'+(W?W.ic:'👕')+'</div>'+
+      SLOT_N[sl]+'<br><span class="iq">'+(W?W.n:'—')+'</span></div>';}
+  const wd=player.wounds||{};
+  if(wd.bleed>0||wd.fracture>0||wd.burn>0){
+    h+='</div><div class="isec">HERIDAS</div><div class="igrid">';
+    if(wd.bleed>0)h+='<div class="icell"><div class="ig">🩸</div>Sangrado<br>'+
+      '<span class="iq">'+Math.round(wd.bleed)+'</span></div>';
+    if(wd.fracture>0)h+='<div class="icell"><div class="ig">🦴</div>Fractura<br>'+
+      '<span class="iq">férula</span></div>';
+    if(wd.burn>0)h+='<div class="icell"><div class="ig">🔥</div>Quemadura<br>'+
+      '<span class="iq">'+Math.round(wd.burn)+'</span></div>';
+  }
   h+='</div><div class="isec">EQUIPO</div><div class="igrid">';
   h+='<div class="icell'+(player.pack?'':' off')+'"><div class="ig">🎒</div>Mochila<br>'+
     '<span class="iq">'+(player.pack?'puesta':'—')+'</span></div>';
@@ -3252,6 +3426,8 @@ function renderInv(){
     (player.wTier?Math.round(player.wDur)+'/'+player.wDurMax:'—')+'</span></div>';
   h+='<div class="icell'+(player.hasGun?'':' off')+'"><div class="ig">🔫</div>Pistola<br>'+
     '<span class="iq">'+(player.hasGun?player.ammo+' balas':'—')+'</span></div>';
+  h+='<div class="icell'+(player.hasShotgun?'':' off')+'"><div class="ig">💥</div>Escopeta<br>'+
+    '<span class="iq">'+(player.hasShotgun?player.shells+' cartuchos':'—')+'</span></div>';
   h+='</div>';
   if(player.books.length){
     h+='<div class="isec">LIBROS</div>';
@@ -3314,6 +3490,19 @@ const RECIPES=[
     can:()=>!!nearCar()||!!inCar,why:'Acércate a un auto',
     make(){const c=inCar||nearCar();c.engine=100;gainXP('mech',40);
       msg('⚙️ Motor a punto');sfx(90,.3,'sawtooth',.05,120);}},
+  {id:'ferula',ic:'🦴',n:'Férula',d:'Entablilla una fractura y vuelves a caminar bien',
+    cost:{wood:1,cloth:2},req:{med:1},
+    can:()=>fractured(),why:'No tienes ninguna fractura',
+    make(){player.wounds.fracture=0;gainXP('med',30);
+      msg('🦴 Entablillado — ya puedes caminar');sfx(300,.2,'triangle',.05);}},
+  {id:'chamarra',ic:'🧥',n:'Chamarra de retazos',d:'Abrigo +16 · protección +5',
+    cost:{cloth:4},req:{carp:1},
+    can:()=>player.wear.torso!=='abrigo',why:'Ya llevas algo mejor',
+    make(){wearItem('chamarra');}},
+  {id:'guantes',ic:'🧤',n:'Guantes',d:'Abrigo +4 · protección +5 · menos mordidas',
+    cost:{cloth:2},
+    can:()=>!player.wear.manos,why:'Ya llevas guantes',
+    make(){wearItem('guantes');}},
   {id:'reparar',ic:'🔧',n:'Reparar arma',d:'Restaura la condición del arma equipada',
     cost:{scrap:2},
     can:()=>player.wTier>0&&player.wDur<player.wDurMax,
