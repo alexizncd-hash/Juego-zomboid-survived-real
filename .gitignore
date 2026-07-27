@@ -1,0 +1,6 @@
+# salida de las pruebas (capturas y temporales)
+tests/_out/
+# artefacto de un solo archivo, se reconstruye con tools/build.js
+dist/
+node_modules/
+.DS_Store

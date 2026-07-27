@@ -1352,9 +1352,37 @@ function saveGame(){
     return true;
   }catch(e){return false;}
 }
+/* Comprueba que un guardado es realmente utilizable ANTES de aceptarlo.
+   Importa mucho desde que las partidas llegan por la red: una subida a
+   medias o una descarga cortada metía datos rotos, loadGame decía "sí" y
+   el juego reventaba en el siguiente frame, dejándote sin salida. */
+function validSave(s){
+  if(!s||typeof s!=='object'||s.v!==SAVE_VER)return false;
+  const N=MW*MH;
+  for(const k of['floor','solid','whue']){
+    if(typeof s[k]!=='string')return false;
+    let a;try{a=b64u8(s[k]);}catch(e){return false;}
+    if(a.length!==N)return false;                   // el mapa debe medir lo que toca
+  }
+  for(const k of['buildings','furns','crates','cars','treesL'])
+    if(!Array.isArray(s[k]))return false;
+  for(const k of['props','fires','zombies'])
+    if(s[k]!==undefined&&!Array.isArray(s[k]))return false;
+  for(const k of['barrs','gates'])
+    if(s[k]!==undefined&&(typeof s[k]!=='object'||s[k]===null||Array.isArray(s[k])))return false;
+  const p=s.player;
+  if(!p||typeof p!=='object')return false;
+  for(const k of['gx','gy','hp'])if(!Number.isFinite(p[k]))return false;
+  // las entidades deben tener coordenadas numéricas, o el render se cae
+  for(const arr of[s.cars,s.furns,s.crates,s.treesL,s.props||[]])
+    for(const o of arr)
+      if(!o||!Number.isFinite(o.gx)||!Number.isFinite(o.gy))return false;
+  if(typeof s.gameTime!=='number'||!Number.isFinite(s.gameTime))return false;
+  return true;
+}
 function loadGame(){
   let s;try{s=JSON.parse(localStorage.getItem(SAVE_KEY));}catch(e){return false;}
-  if(!s||s.v!==SAVE_VER)return false;
+  if(!validSave(s))return false;
   try{
     FLOOR=b64u8(s.floor);SOLID=b64u8(s.solid);WHUE=b64u8(s.whue);
     buildings=s.buildings;furns=s.furns;crates=s.crates;cars=s.cars;
@@ -1399,8 +1427,16 @@ function loadGame(){
     DOM.craft.style.display='none';
     buildStatics();buildMini();
     cam={x:0,y:0};started=true;
+    // Última red: simula un frame completo. Si la partida revienta al
+    // dibujarse, se descarta aquí y no en bucle cada vez que pulses CONTINUAR.
+    try{update(1/60);draw();}
+    catch(e){
+      started=false;player=null;clearSave();
+      msg('El guardado estaba dañado y se descartó',true);
+      return false;
+    }
     return true;
-  }catch(e){return false;}
+  }catch(e){started=false;return false;}
 }
 function manualSave(){
   if(saveGame()){msg('💾 Partida guardada');cloudPush(true);}
@@ -1840,10 +1876,6 @@ function buildTiles(){
 const FKEY=['g0','g1','g2','g3','road','roadm','wood','side','dirt'];
 
 /* ================= DIBUJO ISO ================= */
-function diamond(c,sx,sy,scale){
-  c.beginPath();c.moveTo(sx,sy);c.lineTo(sx+HW*scale,sy+HH*scale);
-  c.lineTo(sx,sy+HH*2*scale);c.lineTo(sx-HW*scale,sy+HH*scale);c.closePath();
-}
 function cube(i,j,h,cols,inset){
   const s=inset||1,off=(1-s)/2;
   const ax=g2sx(i+off,j+off),ay=g2sy(i+off,j+off);           // esquina norte
@@ -3804,7 +3836,7 @@ function refreshStartUI(){
     say('');
     top.innerHTML=rows.map((r,i)=>
       '<div class="tr"><span>'+(i+1)+'. '+escapeHtml(r.name)+(r.won?' 🚁':'')+
-      '</span><b>día '+r.days+' · '+r.kills+' 🧟</b></div>').join('');
+      '</span><b>día '+(+r.days||0)+' · '+(+r.kills||0)+' 🧟</b></div>').join('');
   });
 })();
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,
